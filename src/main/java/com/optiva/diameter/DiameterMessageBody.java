@@ -68,8 +68,13 @@ public class DiameterMessageBody {
     public String toString() {
         StringBuilder sb = new StringBuilder("Body{\n");
         for (DiameterAvp avp : avps.values()) {
-            sb.append(avp);
+            sb.append(avp.toString().replaceAll("\n", "\n\t\t"));
             sb.append("\n");
+            while(avp.getNext() != null) {
+                avp = avp.getNext();
+                sb.append(avp.toString().replaceAll("\n", "\n\t\t"));
+                sb.append("\n");
+            }
         }
         sb.append("}");
 

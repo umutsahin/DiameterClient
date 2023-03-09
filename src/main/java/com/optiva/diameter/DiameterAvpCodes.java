@@ -103,6 +103,9 @@ public final class DiameterAvpCodes {
         DiameterAvpCode TYPE_NUMBER = new DiameterAvpCode("TYPE_NUMBER", 1204, VendorId.TGPP, ENUMERATED);
         DiameterAvpCode VASP_ID = new DiameterAvpCode("VASP_ID", 1101, VendorId.TGPP, UTF8_STRING);
         DiameterAvpCode VAS_ID = new DiameterAvpCode("VASP_ID", 1102, VendorId.TGPP, UTF8_STRING);
+        DiameterAvpCode PCS_REPORT = new DiameterAvpCode("PCS_REPORT", 2903, VendorId.TGPP, GROUPED);
+        DiameterAvpCode PC_IDENTIFIER = new DiameterAvpCode("PC_IDENTIFIER", 2901, VendorId.TGPP, UTF8_STRING);
+        DiameterAvpCode PC_STATUS = new DiameterAvpCode("PC_STATUS", 2902, VendorId.TGPP, UTF8_STRING);
     }
 
     public interface RKN {

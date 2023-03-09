@@ -94,6 +94,11 @@ public class DiameterMessage {
 
     @Override
     public String toString() {
-        return "DiameterMessage{\n" + header+"\n" + body +"\n}";
+        return "DiameterMessage{" +
+               "\n\t" +
+               header.toString().replaceAll("\n", "\n\t") +
+               "\n\t" +
+               body.toString().replaceAll("\n", "\n\t") +
+               "\n}";
     }
 }
