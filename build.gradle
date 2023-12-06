@@ -30,3 +30,27 @@ jar {
 application {
     mainClass = 'com.optiva.DiameterClientOMNT'
 }
+
+tasks.register("singleLocal", JavaExec) {
+    args "127.0.0.1", "3868", "1"
+    mainClass = 'com.optiva.DiameterClient'
+    classpath = sourceSets.main.runtimeClasspath
+}
+
+tasks.register("loadLocal", JavaExec) {
+    args "127.0.0.1", "3868", "100000"
+    mainClass = 'com.optiva.DiameterClient'
+    classpath = sourceSets.main.runtimeClasspath
+}
+
+tasks.register("singleK3D", JavaExec) {
+    args "127.0.0.1", "30868", "1"
+    mainClass = 'com.optiva.DiameterClient'
+    classpath = sourceSets.main.runtimeClasspath
+}
+
+tasks.register("loadK3D", JavaExec) {
+    args "127.0.0.1", "30868", "100000"
+    mainClass = 'com.optiva.DiameterClient'
+    classpath = sourceSets.main.runtimeClasspath
+}
