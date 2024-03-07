@@ -5,11 +5,10 @@ plugins {
 group 'org.example'
 version '1.0-SNAPSHOT'
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
+    implementation("jakarta.xml.bind:jakarta.xml.bind-api:4.0.1")
+    implementation "com.optiva.charging.openapi:diameter:0.1.0-97a0566-snapshot"
+    implementation("io.vertx:vertx-core:4.4.6")
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.7.0'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
 }
@@ -19,38 +18,23 @@ test {
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_1_8
-    targetCompatibility = JavaVersion.VERSION_1_8
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
 
-jar {
-    exclude '**/DiameterClient.class'
-    exclude '**/DiameterServer**'
-}
 application {
-    mainClass = 'com.optiva.DiameterClientOMNT'
+    mainClass = 'com.optiva.DiameterClient'
 }
 
 tasks.register("singleLocal", JavaExec) {
-    args "127.0.0.1", "3868", "1"
+    args "127.0.0.1", "3868", "1", "1"
     mainClass = 'com.optiva.DiameterClient'
     classpath = sourceSets.main.runtimeClasspath
 }
 
 tasks.register("loadLocal", JavaExec) {
-    args "127.0.0.1", "3868", "100000"
+    args "127.0.0.1", "3868", "50", "500000"
     mainClass = 'com.optiva.DiameterClient'
     classpath = sourceSets.main.runtimeClasspath
 }
-
-tasks.register("singleK3D", JavaExec) {
-    args "127.0.0.1", "30868", "1"
-    mainClass = 'com.optiva.DiameterClient'
-    classpath = sourceSets.main.runtimeClasspath
-}
-
-tasks.register("loadK3D", JavaExec) {
-    args "127.0.0.1", "30868", "100000"
-    mainClass = 'com.optiva.DiameterClient'
-    classpath = sourceSets.main.runtimeClasspath
 }
