@@ -37,4 +37,3 @@ tasks.register("loadLocal", JavaExec) {
     mainClass = 'com.optiva.DiameterClient'
     classpath = sourceSets.main.runtimeClasspath
 }
-}
