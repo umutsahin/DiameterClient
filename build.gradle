@@ -7,7 +7,7 @@ version '1.0-SNAPSHOT'
 
 dependencies {
     implementation("jakarta.xml.bind:jakarta.xml.bind-api:4.0.1")
-    implementation "com.optiva.charging.openapi:diameter:0.1.0-97a0566-snapshot"
+    implementation "com.optiva.charging.openapi:diameter:0.1.0-ca9bcd1-snapshot"
     implementation("io.vertx:vertx-core:4.4.6")
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.7.0'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
