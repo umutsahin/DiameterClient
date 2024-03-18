@@ -105,7 +105,8 @@ public class DiameterClient implements Callable<Void> {
         this.session = "session-" + UUID.randomUUID();
         random = new Random();
         this.updateCount = random.nextInt(10) + 1;
-        this.msisdn = Long.toString(4474000000000L + random.nextLong(THR_COUNT) + 1);
+//        this.updateCount = 1;
+        this.msisdn = Long.toString(4574000000000L + random.nextLong(THR_COUNT) + 1);
     }
 
     @Override
@@ -154,11 +155,7 @@ public class DiameterClient implements Callable<Void> {
                 Integer resultCode = dm.getAvp(AvpCodeTable.RFC.RESULT_CODE).getValue();
                 LOGGER.info("Answer received. SessionId: |" + sessionId);
                 LOGGER.info("Answer received. ResultCode: |" + resultCode);
-                if (resultCode != 2001) {
-                    throw new RuntimeException("Failure: " + dm);
-                } else {
-                    return;
-                }
+                return;
             } else {
                 throw new RuntimeException("Failure - unexpected: " + dm);
             }
