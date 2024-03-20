@@ -27,13 +27,13 @@ application {
 }
 
 tasks.register("singleLocal", JavaExec) {
-    args "127.0.0.1", "3868", "1", "1"
+    args "127.0.0.1", "3868", "0"
     mainClass = 'com.optiva.DiameterClient'
     classpath = sourceSets.main.runtimeClasspath
 }
 
 tasks.register("loadLocal", JavaExec) {
-    args "127.0.0.1", "3868", "50", "500000"
+    args "127.0.0.1", "3868", "100"
     mainClass = 'com.optiva.DiameterClient'
     classpath = sourceSets.main.runtimeClasspath
 }
