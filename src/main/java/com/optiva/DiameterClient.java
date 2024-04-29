@@ -12,7 +12,6 @@ import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.time.ZonedDateTime;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -57,10 +56,12 @@ import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.TGPP.PS_INFO
 import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.TGPP.REPORTING_REASON;
 import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.TGPP.SERVICE_INFORMATION;
 import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.TGPP.TGPP_USER_LOCATION_INFO;
+import static jakarta.xml.bind.DatatypeConverter.parseHexBinary;
 
 public class DiameterClient implements Callable<Void> {
     private static final String SERVICE_ID = "32251@3gpp.org";
     private static final long SUBSCRIBER_RANGE_START = 4474000000000L;
+//    private static final long SUBSCRIBER_RANGE_START = 4604000000000L;
     private static final long SUBSCRIBER_COUNT = 1000L;
     private static BlockingQueue<Socket> SOCKETS;
     /////////////////////////////////////////////////////
@@ -122,7 +123,6 @@ public class DiameterClient implements Callable<Void> {
         try {
             Socket socket;
             ref = socket = SOCKETS.take();
-
             long start = System.currentTimeMillis();
             sendMsgAndWaitForAnswer(socket, diameterMessages[0], "CCR-i");
             sleep(250 - System.currentTimeMillis() + start);
@@ -367,8 +367,7 @@ public class DiameterClient implements Callable<Void> {
                                                                                                            "simulator"),
                                                                                                    TGPP_USER_LOCATION_INFO,
                                                                                                    TGPP_USER_LOCATION_INFO.createAvp(
-                                                                                                           Base64.getDecoder()
-                                                                                                                   .decode("0107f41000fb56f6"))))));
+                                                                                                           parseHexBinary("0107f41000fb56f6"))))));
 
     private static final Logger LOGGER = Logger.getLogger("DiameterClient");
 }
