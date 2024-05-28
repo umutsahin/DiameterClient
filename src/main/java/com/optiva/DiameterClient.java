@@ -261,7 +261,7 @@ public class DiameterClient implements Callable<Void> {
                                  MULTIPLE_SERVICES_CREDIT_CONTROL.createAvp(Map.of(REQUESTED_SERVICE_UNIT,
                                                                                    REQUESTED_SERVICE_UNIT.createAvp(),
                                                                                    RATING_GROUP,
-                                                                                   RATING_GROUP.createAvp(1))));
+                                                                                   RATING_GROUP.createAvp(16))));
         DiameterMessageHeader header = new DiameterMessageHeader.Builder(DiameterCommandCode.CC).setApplicationId(4)
                 .setEndToEndId(0x87b09775L)
                 .setHopByHopId(0x00001c20)
@@ -297,7 +297,7 @@ public class DiameterClient implements Callable<Void> {
                                  MULTIPLE_SERVICES_INDICATOR.createAvp(1),
                                  SERVICE_INFORMATION_AVP,
                                  MULTIPLE_SERVICES_CREDIT_CONTROL.createAvp(Map.of(RATING_GROUP,
-                                                                                   RATING_GROUP.createAvp(1),
+                                                                                   RATING_GROUP.createAvp(16),
                                                                                    REPORTING_REASON,
                                                                                    REPORTING_REASON.createAvp(3),
                                                                                    //EXHAUSTED
@@ -343,7 +343,7 @@ public class DiameterClient implements Callable<Void> {
                                  MULTIPLE_SERVICES_INDICATOR.createAvp(1),
                                  SERVICE_INFORMATION_AVP,
                                  MULTIPLE_SERVICES_CREDIT_CONTROL.createAvp(Map.of(RATING_GROUP,
-                                                                                   RATING_GROUP.createAvp(1),
+                                                                                   RATING_GROUP.createAvp(16),
                                                                                    REPORTING_REASON,
                                                                                    REPORTING_REASON.createAvp(2),
                                                                                    USED_SERVICE_UNIT,
@@ -364,10 +364,10 @@ public class DiameterClient implements Callable<Void> {
                                                                                            PS_INFORMATION.createAvp(Map.of(
                                                                                                    CALLED_STATION_ID,
                                                                                                    CALLED_STATION_ID.createAvp(
-                                                                                                           "simulator"),
+                                                                                                           "iot.truphone.com"),
                                                                                                    TGPP_USER_LOCATION_INFO,
                                                                                                    TGPP_USER_LOCATION_INFO.createAvp(
-                                                                                                           parseHexBinary("0107f41000fb56f6"))))));
+                                                                                                           parseHexBinary("0162f2102f4c6bb6"))))));
 
     private static final Logger LOGGER = Logger.getLogger("DiameterClient");
 }
