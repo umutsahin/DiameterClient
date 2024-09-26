@@ -8,6 +8,7 @@ import com.optiva.charging.openapi.diameter.avp.AvpCode;
 import com.optiva.charging.openapi.diameter.avp.AvpCodeTable;
 
 import java.net.Socket;
+import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.time.ZonedDateTime;
 import java.util.List;
@@ -50,45 +51,50 @@ import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.TGPP.TGPP_US
 import static jakarta.xml.bind.DatatypeConverter.parseHexBinary;
 
 public class DiameterClient implements Runnable {
+    private static final int[] ratingGroups = new int[]{16, 32};
     private static final String SERVICE_ID = "32251@3gpp.org";
-    public static final Avp SERVICE_CONTEXT_ID_AVP = SERVICE_CONTEXT_ID.createAvp(SERVICE_ID);
-    private static final long SUBSCRIBER_RANGE_START = 4474000000000L;
-    private static final long SUBSCRIBER_COUNT = 1000L;
-    public static final Avp ORIGIN_HOST_AVP = ORIGIN_HOST.createAvp("diameterclient");
-    public static final Avp ORIGIN_REALM_AVP = ORIGIN_REALM.createAvp("opencloud");
-    public static final Avp DESTINATION_HOST_AVP = DESTINATION_HOST.createAvp("DestinationHost");
-    public static final Avp DESTINATION_REALM_AVP = DESTINATION_REALM.createAvp("opencloud");
-    public static final Avp AUTH_APPLICATION_ID_AVP = AUTH_APPLICATION_ID.createAvp(4);
-    public static final Avp TYPE_CCR_AVP = CC_REQUEST_TYPE.createAvp(1);
-    public static final Avp MULTIPLE_SERVICES_INDICATOR_AVP = MULTIPLE_SERVICES_INDICATOR.createAvp(1);
-    public static final Avp MULTIPLE_SERVICES_CREDIT_CONTROL_CCRI_AVP
-            = MULTIPLE_SERVICES_CREDIT_CONTROL.createAvp(Map.of(REQUESTED_SERVICE_UNIT,
-                                                                REQUESTED_SERVICE_UNIT.createAvp(),
-                                                                RATING_GROUP,
-                                                                RATING_GROUP.createAvp(16)));
-    public static final DiameterMessageHeader DIAMETER_MESSAGE_HEADER = new DiameterMessageHeader.Builder(
+    private static final Avp SERVICE_CONTEXT_ID_AVP = SERVICE_CONTEXT_ID.createAvp(SERVICE_ID);
+    private static final Avp ORIGIN_HOST_AVP = ORIGIN_HOST.createAvp("diameterclient");
+    private static final Avp ORIGIN_REALM_AVP = ORIGIN_REALM.createAvp("opencloud");
+    private static final Avp DESTINATION_HOST_AVP = DESTINATION_HOST.createAvp("DestinationHost");
+    private static final Avp DESTINATION_REALM_AVP = DESTINATION_REALM.createAvp("opencloud");
+    private static final Avp AUTH_APPLICATION_ID_AVP = AUTH_APPLICATION_ID.createAvp(4);
+    private static final Avp TYPE_CCR_AVP = CC_REQUEST_TYPE.createAvp(1);
+    private static final Avp MULTIPLE_SERVICES_INDICATOR_AVP = MULTIPLE_SERVICES_INDICATOR.createAvp(1);
+    private static final DiameterMessageHeader DIAMETER_MESSAGE_HEADER = new DiameterMessageHeader.Builder(
             DiameterCommandCode.CC).setApplicationId(4)
             .setEndToEndId(0x87b09775L)
             .setHopByHopId(0x00001c20)
             .setRequest()
             .setVersion((byte) 1)
             .build();
-    public static final String CCR_T = "CCR-t";
-    public static final String CCR_U = "CCR-u";
-    public static final String CCR_I = "CCR-i";
-    public static final ZonedDateTime NOW = ZonedDateTime.now();
+    private static final String CCR_T = "CCR-t";
+    private static final String CCR_U = "CCR-u";
+    private static final String CCR_I = "CCR-i";
+    private static final ZonedDateTime NOW = ZonedDateTime.now();
     /////////////////////////////////////////////////////
     private final byte[] BYTE_ARR_BUFFER = new byte[4096];
     private final ByteBuffer BYTE_BUFFER = ByteBuffer.allocate(4096);
+    private final DiameterLoadRunner loadRunner;
     private final BlockingQueue<Socket> socketQueue;
     private final AtomicLong counter;
+    private final long subscriberRangeStart;
+    private final int subscriberCount;
     private Logger logger;
     private int requestNumber = 0;
     private long grantLimit;
+    private int ratingGroup;
 
-    public DiameterClient(BlockingQueue<Socket> socketQueue, AtomicLong counter) {
+    public DiameterClient(DiameterLoadRunner loadRunner,
+                          BlockingQueue<Socket> socketQueue,
+                          AtomicLong counter,
+                          long subscriberRangeStart,
+                          int subscriberCount) {
+        this.loadRunner = loadRunner;
         this.socketQueue = socketQueue;
         this.counter = counter;
+        this.subscriberRangeStart = subscriberRangeStart;
+        this.subscriberCount = subscriberCount;
     }
 
     @Override
@@ -96,7 +102,8 @@ public class DiameterClient implements Runnable {
         Socket ref = null;
         String session = "session-" + UUID.randomUUID();
         Random random = new Random();
-        String msisdn = Long.toString(SUBSCRIBER_RANGE_START + random.nextLong(SUBSCRIBER_COUNT) + 1);
+        ratingGroup = ratingGroups[random.nextInt(ratingGroups.length)];
+        String msisdn = Long.toString(subscriberRangeStart + random.nextLong(subscriberCount) + 1);
         logger = Logger.getLogger(Thread.currentThread().getName());
         try {
             Socket socket;
@@ -104,17 +111,25 @@ public class DiameterClient implements Runnable {
             long start = System.currentTimeMillis();
             boolean success = sendMsgAndWaitForAnswer(socket, ccrI(session, msisdn), CCR_I);
             sleep(CALL_SLEEP - System.currentTimeMillis() + start);
+            ratingGroup = ratingGroups[random.nextInt(ratingGroups.length)];
             start = System.currentTimeMillis();
             success = success && sendMsgAndWaitForAnswer(socket, ccrU(session, msisdn, getChargeValue()), CCR_U);
             sleep(CALL_SLEEP - System.currentTimeMillis() + start);
+            ratingGroup = ratingGroups[random.nextInt(ratingGroups.length)];
             start = System.currentTimeMillis();
             success = success && sendMsgAndWaitForAnswer(socket, ccrU(session, msisdn, getChargeValue()), CCR_U);
             sleep(CALL_SLEEP - System.currentTimeMillis() + start);
+            ratingGroup = ratingGroups[random.nextInt(ratingGroups.length)];
             start = System.currentTimeMillis();
             success = success && sendMsgAndWaitForAnswer(socket, ccrT(session, msisdn, getChargeValue()), CCR_T);
             sleep(CALL_SLEEP - System.currentTimeMillis() + start);
         } catch (Exception e) {
-            logger.log(Level.SEVERE, "Unable to complete flow", e);
+            if (e.getCause() instanceof SocketException) {
+                logger.severe("Socket closed, reconnecting | cause:" + e.getMessage());
+                ref = loadRunner.initializeSocket();
+            } else {
+                logger.log(Level.SEVERE, "Unable to complete flow", e);
+            }
         } finally {
             if (ref != null) {
                 socketQueue.add(ref);
@@ -189,7 +204,10 @@ public class DiameterClient implements Runnable {
                                  TYPE_CCR_AVP,
                                  SERVICE_INFORMATION_AVP,
                                  MULTIPLE_SERVICES_INDICATOR_AVP,
-                                 MULTIPLE_SERVICES_CREDIT_CONTROL_CCRI_AVP,
+                                 MULTIPLE_SERVICES_CREDIT_CONTROL.createAvp(Map.of(REQUESTED_SERVICE_UNIT,
+                                                                                   REQUESTED_SERVICE_UNIT.createAvp(),
+                                                                                   RATING_GROUP,
+                                                                                   RATING_GROUP.createAvp(ratingGroup))),
                                  SESSION_ID.createAvp(sessionId),
                                  EVENT_TIMESTAMP.createAvp(NOW),
                                  CC_REQUEST_NUMBER.createAvp(requestNumber++),
@@ -214,7 +232,7 @@ public class DiameterClient implements Runnable {
                                  MULTIPLE_SERVICES_INDICATOR_AVP,
                                  SERVICE_INFORMATION_AVP,
                                  MULTIPLE_SERVICES_CREDIT_CONTROL.createAvp(Map.of(RATING_GROUP,
-                                                                                   RATING_GROUP.createAvp(16),
+                                                                                   RATING_GROUP.createAvp(ratingGroup),
                                                                                    REPORTING_REASON,
                                                                                    REPORTING_REASON.createAvp(3),
                                                                                    //EXHAUSTED
@@ -251,7 +269,7 @@ public class DiameterClient implements Runnable {
                                  MULTIPLE_SERVICES_INDICATOR_AVP,
                                  SERVICE_INFORMATION_AVP,
                                  MULTIPLE_SERVICES_CREDIT_CONTROL.createAvp(Map.of(RATING_GROUP,
-                                                                                   RATING_GROUP.createAvp(16),
+                                                                                   RATING_GROUP.createAvp(ratingGroup),
                                                                                    REPORTING_REASON,
                                                                                    REPORTING_REASON.createAvp(2),
                                                                                    USED_SERVICE_UNIT,

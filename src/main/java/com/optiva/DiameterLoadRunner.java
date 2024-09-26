@@ -34,51 +34,65 @@ import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.VENDOR_I
 public class DiameterLoadRunner {
     public static final int CALL_SLEEP = 500;
     private static final Logger LOGGER = Logger.getLogger(DiameterLoadRunner.class.getSimpleName());
+    private static String ip;
+    private static int port;
     private final LinkedBlockingQueue<Socket> socketsQueue;
-    private final ScheduledExecutorService service;
     private final AtomicLong counter;
-    private final Instant startTime;
+    private ScheduledExecutorService service;
+    private Instant startTime;
 
     public static void main(String[] args) throws InterruptedException {
-        String ip = args[0];
-        int port = Integer.parseInt(args[1]);
+        ip = args[0];
+        port = Integer.parseInt(args[1]);
         int tps = Integer.parseInt(args[2]);
-        int duration = args.length > 3
-                       ? Integer.parseInt(args[3])
-                       : 600;
-        new DiameterLoadRunner(ip, port, tps, duration);
+        int duration = Integer.parseInt(args[3]);
+        long subscriberRangeStart = Long.parseLong(args[4]);
+        int subscriberCount = Integer.parseInt(args[5]);
+        new DiameterLoadRunner(tps, duration, subscriberRangeStart, subscriberCount);
     }
 
-    public DiameterLoadRunner(String ip, int port, int tps, int duration) throws InterruptedException {
+    public DiameterLoadRunner(int tps,
+                              int duration,
+                              long subscriberRangeStart,
+                              int subscriberCount) throws InterruptedException {
         int cc = CALL_SLEEP * 4 / 1000;
         int threadCount = Math.max(tps * CALL_SLEEP / 1000, 1);
         int callCount = Math.ceilDiv(duration, cc);
         int createSleep = CALL_SLEEP / threadCount;
         duration = callCount * cc;
         LOGGER.info("Starting connections...");
-        socketsQueue = prepareConnections(ip, port, threadCount);
+        socketsQueue = prepareConnections(threadCount);
         counter = new AtomicLong(0);
         LOGGER.info("Starting load...");
         LOGGER.info("TPS: " + tps + ", Duration: " + duration + " seconds");
-        service = Executors.newScheduledThreadPool(threadCount + 1);
-        startTime = Instant.now();
-        List<? extends ScheduledFuture<?>> scheduledTasks = IntStream.range(0, threadCount).boxed().map(i -> {
-            try {
-                Thread.sleep(i * createSleep);
-            } catch (InterruptedException e) {
-                // ignored
-            }
-            return service.scheduleAtFixedRate(new DiameterClient(socketsQueue, counter), 0, 1, TimeUnit.SECONDS);
-        }).toList();
-        service.schedule(() -> {
-            scheduledTasks.forEach(s -> s.cancel(false));
-            service.shutdown();
-        }, duration, TimeUnit.SECONDS);
-        logStatus(duration);
-        LOGGER.info("Waiting for threads to stop...");
-        boolean ignored = service.awaitTermination(10, TimeUnit.SECONDS);
-        LOGGER.info("Closing connections...");
+        if (tps == 1 && callCount == 1) {
+            new DiameterClient(this, socketsQueue, counter, subscriberRangeStart, subscriberCount).run();
+        } else {
+            service = Executors.newScheduledThreadPool(threadCount + 1);
+            startTime = Instant.now();
+            List<? extends ScheduledFuture<?>> scheduledTasks = IntStream.range(0, threadCount).boxed().map(i -> {
+                try {
+                    Thread.sleep(i * createSleep);
+                } catch (InterruptedException e) {
+                    // ignored
+                }
+                return service.scheduleAtFixedRate(new DiameterClient(this,
+                                                                      socketsQueue,
+                                                                      counter,
+                                                                      subscriberRangeStart,
+                                                                      subscriberCount), 0, 1, TimeUnit.SECONDS);
+            }).toList();
+            service.schedule(() -> {
+                scheduledTasks.forEach(s -> s.cancel(false));
+                service.shutdown();
+            }, duration, TimeUnit.SECONDS);
+            logStatus(duration);
+            LOGGER.info("Waiting for threads to stop...");
+            boolean ignored = service.awaitTermination(10, TimeUnit.SECONDS);
+            LOGGER.info("Closing connections...");
+        }
         closeConnections();
+        LOGGER.info("Total requests sent: " + counter.get() + ", Total duration: " + duration);
     }
 
     private void closeConnections() {
@@ -114,13 +128,13 @@ public class DiameterLoadRunner {
         }
     }
 
-    private LinkedBlockingQueue<Socket> prepareConnections(String ip, int port, int threadCount) {
+    private LinkedBlockingQueue<Socket> prepareConnections(int threadCount) {
         return IntStream.range(0, threadCount)
-                .mapToObj(i -> initializeSocket(ip, port))
+                .mapToObj(i -> initializeSocket())
                 .collect(Collectors.toCollection(LinkedBlockingQueue::new));
     }
 
-    private Socket initializeSocket(String ip, int port) {
+    public Socket initializeSocket() {
         Socket socket;
         do {
             try {
