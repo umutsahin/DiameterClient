@@ -101,6 +101,7 @@ public class DiameterClient implements Runnable {
     public void run() {
         Socket ref = null;
         String session = "session-" + UUID.randomUUID();
+        requestNumber = 0;
         Random random = new Random();
         ratingGroup = ratingGroups[random.nextInt(ratingGroups.length)];
         String msisdn = Long.toString(subscriberRangeStart + random.nextLong(subscriberCount) + 1);
