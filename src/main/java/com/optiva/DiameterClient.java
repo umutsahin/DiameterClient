@@ -17,6 +17,7 @@ import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -61,10 +62,10 @@ public class DiameterClient implements Runnable {
     private static final Avp AUTH_APPLICATION_ID_AVP = AUTH_APPLICATION_ID.createAvp(4);
     private static final Avp TYPE_CCR_AVP = CC_REQUEST_TYPE.createAvp(1);
     private static final Avp MULTIPLE_SERVICES_INDICATOR_AVP = MULTIPLE_SERVICES_INDICATOR.createAvp(1);
-    private static final DiameterMessageHeader DIAMETER_MESSAGE_HEADER = new DiameterMessageHeader.Builder(
+    private static final Function<Random , DiameterMessageHeader> DIAMETER_MESSAGE_HEADER = r -> new DiameterMessageHeader.Builder(
             DiameterCommandCode.CC).setApplicationId(4)
-            .setEndToEndId(0x87b09775L)
-            .setHopByHopId(0x00001c20)
+            .setEndToEndId(r.nextLong())
+            .setHopByHopId(r.nextLong())
             .setRequest()
             .setVersion((byte) 1)
             .build();
@@ -84,6 +85,7 @@ public class DiameterClient implements Runnable {
     private int requestNumber = 0;
     private long grantLimit;
     private int ratingGroup;
+    private String session;
 
     public DiameterClient(DiameterLoadRunner loadRunner,
                           BlockingQueue<Socket> socketQueue,
@@ -100,7 +102,7 @@ public class DiameterClient implements Runnable {
     @Override
     public void run() {
         Socket ref = null;
-        String session = "session-" + UUID.randomUUID();
+        session = "session-" + UUID.randomUUID();
         requestNumber = 0;
         Random random = new Random();
         ratingGroup = ratingGroups[random.nextInt(ratingGroups.length)];
@@ -110,19 +112,19 @@ public class DiameterClient implements Runnable {
             Socket socket;
             ref = socket = socketQueue.take();
             long start = System.currentTimeMillis();
-            boolean success = sendMsgAndWaitForAnswer(socket, ccrI(session, msisdn), CCR_I);
+            boolean success = sendMsgAndWaitForAnswer(socket, ccrI(session, msisdn, random), CCR_I);
             sleep(CALL_SLEEP - System.currentTimeMillis() + start);
             ratingGroup = ratingGroups[random.nextInt(ratingGroups.length)];
             start = System.currentTimeMillis();
-            success = success && sendMsgAndWaitForAnswer(socket, ccrU(session, msisdn, getChargeValue()), CCR_U);
+            success = success && sendMsgAndWaitForAnswer(socket, ccrU(session, msisdn, getChargeValue(), random), CCR_U);
             sleep(CALL_SLEEP - System.currentTimeMillis() + start);
             ratingGroup = ratingGroups[random.nextInt(ratingGroups.length)];
             start = System.currentTimeMillis();
-            success = success && sendMsgAndWaitForAnswer(socket, ccrU(session, msisdn, getChargeValue()), CCR_U);
+            success = success && sendMsgAndWaitForAnswer(socket, ccrU(session, msisdn, getChargeValue(), random), CCR_U);
             sleep(CALL_SLEEP - System.currentTimeMillis() + start);
             ratingGroup = ratingGroups[random.nextInt(ratingGroups.length)];
             start = System.currentTimeMillis();
-            success = success && sendMsgAndWaitForAnswer(socket, ccrT(session, msisdn, getChargeValue()), CCR_T);
+            success = success && sendMsgAndWaitForAnswer(socket, ccrT(session, msisdn, getChargeValue(), random), CCR_T);
             sleep(CALL_SLEEP - System.currentTimeMillis() + start);
         } catch (Exception e) {
             if (e.getCause() instanceof SocketException) {
@@ -187,15 +189,15 @@ public class DiameterClient implements Runnable {
                     throw new RuntimeException("Failure - unexpected: " + dm);
                 }
             }
-            throw new RuntimeException("Problem on received answer");
+            throw new RuntimeException(session + " - Problem on received answer");
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException(session, e);
         } finally {
             counter.incrementAndGet();
         }
     }
 
-    public byte[] ccrI(String sessionId, String msisdn) {
+    public byte[] ccrI(String sessionId, String msisdn, Random random) {
         List<Avp> avps = List.of(ORIGIN_HOST_AVP,
                                  ORIGIN_REALM_AVP,
                                  DESTINATION_HOST_AVP,
@@ -213,10 +215,10 @@ public class DiameterClient implements Runnable {
                                  EVENT_TIMESTAMP.createAvp(NOW),
                                  CC_REQUEST_NUMBER.createAvp(requestNumber++),
                                  getSubscriptionIdAvp(msisdn));
-        return new DiameterMessage(DIAMETER_MESSAGE_HEADER, avps).convertToBytes(BYTE_BUFFER);
+        return new DiameterMessage(DIAMETER_MESSAGE_HEADER.apply(random), avps).convertToBytes(BYTE_BUFFER);
     }
 
-    public byte[] ccrU(String sessionId, String msisdn, long chargeValue) {
+    public byte[] ccrU(String sessionId, String msisdn, long chargeValue, Random random) {
         long inputValue = (long) (chargeValue * 0.1);
         long outputValue = chargeValue - inputValue;
         List<Avp> avps = List.of(SESSION_ID.createAvp(sessionId),
@@ -250,10 +252,10 @@ public class DiameterClient implements Runnable {
                                                                                                    outputValue))),
                                                                                    REQUESTED_SERVICE_UNIT,
                                                                                    REQUESTED_SERVICE_UNIT.createAvp())));
-        return new DiameterMessage(DIAMETER_MESSAGE_HEADER, avps).convertToBytes(BYTE_BUFFER);
+        return new DiameterMessage(DIAMETER_MESSAGE_HEADER.apply(random), avps).convertToBytes(BYTE_BUFFER);
     }
 
-    public byte[] ccrT(String sessionId, String msisdn, long chargeValue) {
+    public byte[] ccrT(String sessionId, String msisdn, long chargeValue, Random random) {
         long inputValue = (long) (chargeValue * 0.1);
         long outputValue = chargeValue - inputValue;
         List<Avp> avps = List.of(SESSION_ID.createAvp(sessionId),
@@ -284,7 +286,7 @@ public class DiameterClient implements Runnable {
                                                                                            CC_OUTPUT_OCTETS,
                                                                                            CC_OUTPUT_OCTETS.createAvp(
                                                                                                    outputValue))))));
-        return new DiameterMessage(DIAMETER_MESSAGE_HEADER, avps).convertToBytes(BYTE_BUFFER);
+        return new DiameterMessage(DIAMETER_MESSAGE_HEADER.apply(random), avps).convertToBytes(BYTE_BUFFER);
     }
 
     private static Avp getSubscriptionIdAvp(String msisdn) {
@@ -302,5 +304,5 @@ public class DiameterClient implements Runnable {
                                                                                                    TGPP_USER_LOCATION_INFO,
                                                                                                    TGPP_USER_LOCATION_INFO.createAvp(
                                                                                                            parseHexBinary(
-                                                                                                                   "0162f2102f4c6bb6"))))));
+                                                                                                                   "0156F51000010005"))))));
 }

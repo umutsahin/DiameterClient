@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
@@ -40,6 +41,7 @@ public class DiameterLoadRunner {
     private final AtomicLong counter;
     private ScheduledExecutorService service;
     private Instant startTime;
+    private static final Random random = new Random();
 
     public static void main(String[] args) throws InterruptedException {
         ip = args[0];
@@ -158,8 +160,8 @@ public class DiameterLoadRunner {
     private static void cex(Socket socket) throws IOException {
         DiameterMessageHeader header = new DiameterMessageHeader.Builder(DiameterCommandCode.CE).setApplicationId(0)
                 .setRequest()
-                .setHopByHopId(0xa69025ddL)
-                .setEndToEndId(0xb4b6e14cL)
+                .setHopByHopId(random.nextLong())
+                .setEndToEndId(random.nextLong())
                 .build();
 
         List<Avp> avps = Arrays.asList(ORIGIN_REALM.createAvp("siemens.de"),
