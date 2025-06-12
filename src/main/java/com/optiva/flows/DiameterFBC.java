@@ -5,8 +5,8 @@ import com.optiva.charging.openapi.diameter.DiameterMessage;
 import com.optiva.charging.openapi.diameter.DiameterMessageHeader;
 import com.optiva.charging.openapi.diameter.avp.Avp;
 import com.optiva.charging.openapi.diameter.avp.AvpCode;
-
-import java.nio.ByteBuffer;
+import io.vertx.core.buffer.Buffer; // Changed import
+import java.nio.ByteBuffer; // Keep ByteBuffer for conversion
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -64,7 +64,7 @@ public class DiameterFBC implements DiameterFlow {
     }
 
     @Override
-    public ByteBuffer getNextMessage() {
+    public Buffer getNextMessage() { // Changed return type
         if (requestNumber == 1) {
             return ccrIMessage();
         } else if (requestNumber > 1 && requestNumber < messageCount) {
@@ -86,17 +86,17 @@ public class DiameterFBC implements DiameterFlow {
         return new DiameterFBC(msisdn, ratingGroup, messageCount);
     }
 
-    public ByteBuffer ccrIMessage() {
+    public Buffer ccrIMessage() { // Changed return type
         DiameterMessageHeader header = headerSupplier.get();
         return messageFunction.apply(header, dynamicAvps(1, true, 0));
     }
 
-    public ByteBuffer ccrURequest() {
+    public Buffer ccrURequest() { // Changed return type
         DiameterMessageHeader header = headerSupplier.get();
         return messageFunction.apply(header, dynamicAvps(2, true, 1000L));
     }
 
-    public ByteBuffer ccrTRequest() {
+    public Buffer ccrTRequest() { // Changed return type
         DiameterMessageHeader header = headerSupplier.get();
         return messageFunction.apply(header, dynamicAvps(3, false, 1000L));
     }
@@ -136,12 +136,17 @@ public class DiameterFBC implements DiameterFlow {
             .setVersion((byte) 1)
             .build();
 
-    private final BiFunction<DiameterMessageHeader, List<Avp>, ByteBuffer> messageFunction = (header, dynamicAvps) -> {
+    // Changed BiFunction to return Vert.x Buffer
+    private final BiFunction<DiameterMessageHeader, List<Avp>, Buffer> messageFunction = (header, dynamicAvps) -> {
         ArrayList<Avp> avps = new ArrayList<>(dynamicAvps.size() + STATIC_AVPS.size());
         avps.addAll(STATIC_AVPS);
         avps.addAll(dynamicAvps);
-        ByteBuffer buffer = BUFFER.get();
-        new DiameterMessage(header, avps).convertToByteBuffer(buffer);
+
+        // Convert DiameterMessage to ByteBuffer first, then to Vert.x Buffer
+        ByteBuffer byteBuffer = ByteBuffer.allocate(8192);
+        new DiameterMessage(header, avps).convertToByteBuffer(byteBuffer);
+        byteBuffer.flip(); // Prepare ByteBuffer for reading
+        Buffer buffer = Buffer.buffer(byteBuffer); // Convert ByteBuffer to Vert.x Buffer
         return buffer;
     };
 

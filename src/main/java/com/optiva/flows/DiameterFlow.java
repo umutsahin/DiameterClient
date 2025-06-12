@@ -1,13 +1,13 @@
 package com.optiva.flows;
 
-import java.nio.ByteBuffer;
+import io.vertx.core.buffer.Buffer; // Changed import
 import java.util.concurrent.ThreadLocalRandom;
 
 public interface DiameterFlow {
-    ThreadLocal<ByteBuffer> BUFFER = ThreadLocal.withInitial(() -> ByteBuffer.allocate(8192));
+    ThreadLocal<Buffer> BUFFER = ThreadLocal.withInitial(() -> Buffer.buffer(8192)); // Changed type and initialization
     ThreadLocalRandom RANDOM = ThreadLocalRandom.current();
 
-    ByteBuffer getNextMessage();
+    Buffer getNextMessage(); // Changed return type
 
     String getKey();
 

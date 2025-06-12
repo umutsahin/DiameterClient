@@ -4,10 +4,10 @@ import com.optiva.charging.openapi.diameter.DiameterCommandCode;
 import com.optiva.charging.openapi.diameter.DiameterMessage;
 import com.optiva.charging.openapi.diameter.DiameterMessageHeader;
 import com.optiva.charging.openapi.diameter.avp.Avp;
-
+import io.vertx.core.buffer.Buffer; // Changed import
 import java.net.Inet4Address;
 import java.net.UnknownHostException;
-import java.nio.ByteBuffer;
+import java.nio.ByteBuffer; // Keep ByteBuffer for conversion
 import java.util.List;
 
 import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.HOST_IP_ADDRESS;
@@ -32,15 +32,18 @@ public class DiameterCE implements DiameterFlow {
     }
 
     @Override
-    public ByteBuffer getNextMessage() {
+    public Buffer getNextMessage() { // Changed return type
         DiameterMessageHeader header = new DiameterMessageHeader.Builder(DiameterCommandCode.CE).setApplicationId(0)
                 .setRequest()
                 .setHopByHopId(RANDOM.nextLong())
                 .setEndToEndId(RANDOM.nextLong())
                 .build();
 
-        ByteBuffer buffer = BUFFER.get();
-        new DiameterMessage(header, AVPS).convertToByteBuffer(buffer);
+        // Convert DiameterMessage to ByteBuffer first, then to Vert.x Buffer
+        ByteBuffer byteBuffer = ByteBuffer.allocate(8192);
+        new DiameterMessage(header, AVPS).convertToByteBuffer(byteBuffer);
+        byteBuffer.flip(); // Prepare ByteBuffer for reading
+        Buffer buffer = Buffer.buffer(byteBuffer); // Convert ByteBuffer to Vert.x Buffer
         return buffer;
     }
 
