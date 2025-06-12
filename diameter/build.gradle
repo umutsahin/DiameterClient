@@ -1,0 +1,30 @@
+plugins {
+    id 'java'
+}
+
+dependencies {
+    implementation "io.vertx:vertx-core:5.0.0"
+
+    testRuntimeOnly "org.junit.jupiter:junit-jupiter-api:5.10.1"
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.1"
+    testImplementation "org.junit.jupiter:junit-jupiter-engine:5.10.1"
+    testImplementation "org.mockito:mockito-core:5.7.0"
+    testImplementation "org.mockito:mockito-junit-jupiter:5.7.0"
+    testImplementation "org.hamcrest:hamcrest:2.2"
+    testImplementation "org.apache.commons:commons-lang3:3.14.0"
+    testImplementation 'io.netty:netty-buffer:4.1.100.Final'
+}
+
+java {
+    withSourcesJar()
+    withJavadocJar()
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events "passed", "skipped", "failed"
+    }
+}
+
+javadoc.options.addStringOption('Xdoclint:none', '-quiet')
