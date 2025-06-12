@@ -135,12 +135,11 @@ public class DiameterClientVerticle extends AbstractVerticle {
     public void stop(Promise<Void> stopPromise) {
         System.out.println("DiameterClientVerticle stopping. Closing " + sockets.size() + " sockets.");
         responseHandlers.clear();
-        List<Future> closeFutures = new ArrayList<>();
-        for (NetSocket socket : new ArrayList<>(sockets)) { // Iterate over a copy for safe removal
-            Promise<Void> p = Promise.promise();
-            socket.close(p); // close() is idempotent
-            closeFutures.add(p.future());
-        }
+        List<Future<Void>> closeFutures = sockets.stream().map(s -> {
+            Promise<Void> promise = Promise.promise();
+            s.close(promise);
+            return promise.future();
+        }).toList();
 
         Future.all(closeFutures).onComplete(ar -> {
             sockets.clear(); // Ensure list is empty

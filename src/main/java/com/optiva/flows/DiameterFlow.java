@@ -1,10 +1,13 @@
 package com.optiva.flows;
 
-import io.vertx.core.buffer.Buffer; // Changed import
+import com.optiva.charging.openapi.diameter.DiameterMessage;
+import io.netty.buffer.ByteBuf;
+import io.vertx.core.buffer.Buffer;
+import io.vertx.core.buffer.impl.BufferImpl;
+
 import java.util.concurrent.ThreadLocalRandom;
 
 public interface DiameterFlow {
-    ThreadLocal<Buffer> BUFFER = ThreadLocal.withInitial(() -> Buffer.buffer(8192)); // Changed type and initialization
     ThreadLocalRandom RANDOM = ThreadLocalRandom.current();
 
     Buffer getNextMessage(); // Changed return type
@@ -12,4 +15,11 @@ public interface DiameterFlow {
     String getKey();
 
     DiameterFlow restart();
+
+    default Buffer writeMessageToBuffer(DiameterMessage dm) {
+        BufferImpl buffer = (BufferImpl) Buffer.buffer(8192);
+        ByteBuf byteBuf = buffer.byteBuf();
+        dm.convertToByteBuf(byteBuf);
+        return buffer;
+    }
 }

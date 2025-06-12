@@ -1,12 +1,14 @@
 package com.optiva.flows;
 
-import com.optiva.charging.openapi.diameter.DiameterCommandCode;
 import com.optiva.charging.openapi.diameter.DiameterMessage;
 import com.optiva.charging.openapi.diameter.DiameterMessageHeader;
 import com.optiva.charging.openapi.diameter.avp.Avp;
 import com.optiva.charging.openapi.diameter.avp.AvpCode;
-import io.vertx.core.buffer.Buffer; // Changed import
-import java.nio.ByteBuffer; // Keep ByteBuffer for conversion
+import com.optiva.charging.openapi.diameter.common.enumeration.CommandCode;
+import io.netty.buffer.ByteBuf;
+import io.vertx.core.Vertx;
+import io.vertx.core.buffer.Buffer;
+
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -17,32 +19,32 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.AUTH_APPLICATION_ID;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.CALLED_STATION_ID;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.CC_INPUT_OCTETS;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.CC_OUTPUT_OCTETS;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.CC_REQUEST_NUMBER;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.CC_REQUEST_TYPE;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.CC_TOTAL_OCTETS;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.DESTINATION_HOST;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.DESTINATION_REALM;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.EVENT_TIMESTAMP;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.MULTIPLE_SERVICES_CREDIT_CONTROL;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.MULTIPLE_SERVICES_INDICATOR;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.ORIGIN_HOST;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.ORIGIN_REALM;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.RATING_GROUP;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.REQUESTED_SERVICE_UNIT;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.SERVICE_CONTEXT_ID;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.SESSION_ID;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.SUBSCRIPTION_ID;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.SUBSCRIPTION_ID_DATA;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.SUBSCRIPTION_ID_TYPE;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.USED_SERVICE_UNIT;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.TGPP.PS_INFORMATION;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.TGPP.REPORTING_REASON;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.TGPP.SERVICE_INFORMATION;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.TGPP.TGPP_USER_LOCATION_INFO;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.AUTH_APPLICATION_ID;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.CALLED_STATION_ID;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.CC_INPUT_OCTETS;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.CC_OUTPUT_OCTETS;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.CC_REQUEST_NUMBER;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.CC_REQUEST_TYPE;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.CC_TOTAL_OCTETS;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.DESTINATION_HOST;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.DESTINATION_REALM;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.EVENT_TIMESTAMP;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.MULTIPLE_SERVICES_CREDIT_CONTROL;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.MULTIPLE_SERVICES_INDICATOR;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.ORIGIN_HOST;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.ORIGIN_REALM;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.RATING_GROUP;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.REQUESTED_SERVICE_UNIT;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.SERVICE_CONTEXT_ID;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.SESSION_ID;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.SUBSCRIPTION_ID;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.SUBSCRIPTION_ID_DATA;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.SUBSCRIPTION_ID_TYPE;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.USED_SERVICE_UNIT;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.TGPP.PS_INFORMATION;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.TGPP.REPORTING_REASON;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.TGPP.SERVICE_INFORMATION;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.TGPP.TGPP_USER_LOCATION_INFO;
 import static jakarta.xml.bind.DatatypeConverter.parseHexBinary;
 
 public class DiameterFBC implements DiameterFlow {
@@ -129,7 +131,7 @@ public class DiameterFBC implements DiameterFlow {
     }
 
     private final Supplier<DiameterMessageHeader> headerSupplier = () -> new DiameterMessageHeader.Builder(
-            DiameterCommandCode.CC).setApplicationId(4)
+            CommandCode.CC).setApplicationId(4)
             .setEndToEndId(random.nextLong())
             .setHopByHopId(random.nextLong())
             .setRequest()
@@ -142,12 +144,7 @@ public class DiameterFBC implements DiameterFlow {
         avps.addAll(STATIC_AVPS);
         avps.addAll(dynamicAvps);
 
-        // Convert DiameterMessage to ByteBuffer first, then to Vert.x Buffer
-        ByteBuffer byteBuffer = ByteBuffer.allocate(8192);
-        new DiameterMessage(header, avps).convertToByteBuffer(byteBuffer);
-        byteBuffer.flip(); // Prepare ByteBuffer for reading
-        Buffer buffer = Buffer.buffer(byteBuffer); // Convert ByteBuffer to Vert.x Buffer
-        return buffer;
+        return writeMessageToBuffer(new DiameterMessage(header, avps));
     };
 
     private static List<Avp> staticAvps() {

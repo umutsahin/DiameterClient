@@ -60,7 +60,7 @@ public class MainVerticle extends AbstractVerticle {
                 // For now, assuming clientVerticle is the correct, deployed instance accessible here.
                 // A better way for inter-verticle communication is often the event bus.
                 // But for direct method calls within the same JVM and Vert.x instance, this can work.
-                flowExecutor = new DiameterFlowExecutor(vertx, clientVerticle, activeFlows);
+                flowExecutor = new DiameterFlowExecutor(clientVerticle, activeFlows);
 
                 new Thread(this::handleStdIn).start(); // Start handling stdin commands
                 System.out.println("MainVerticle started. Enter TPS value (e.g., 'tps 100') or 'shutdown'.");
@@ -147,7 +147,7 @@ public class MainVerticle extends AbstractVerticle {
                 }
 
                 // Create and execute a new DiameterFBC flow
-                String msisdn = "447400" + String.format("%07d", random.nextInt(10000000));
+                String msisdn = "447400000" + String.format("%04d", random.nextInt(1000));
                 DiameterFlow flow = new DiameterFBC(msisdn, fbcRatingGroup, fbcMessageCount);
 
                 System.out.println("MainVerticle: Triggering new flow " + flow.getKey() +

@@ -1,20 +1,19 @@
 package com.optiva.flows;
 
-import com.optiva.charging.openapi.diameter.DiameterCommandCode;
 import com.optiva.charging.openapi.diameter.DiameterMessage;
 import com.optiva.charging.openapi.diameter.DiameterMessageHeader;
 import com.optiva.charging.openapi.diameter.avp.Avp;
+import com.optiva.charging.openapi.diameter.common.enumeration.CommandCode;
 import io.vertx.core.buffer.Buffer; // Changed import
 import java.net.Inet4Address;
 import java.net.UnknownHostException;
-import java.nio.ByteBuffer; // Keep ByteBuffer for conversion
 import java.util.List;
 
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.HOST_IP_ADDRESS;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.ORIGIN_HOST;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.ORIGIN_REALM;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.PRODUCT_NAME;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.VENDOR_ID;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.HOST_IP_ADDRESS;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.ORIGIN_HOST;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.ORIGIN_REALM;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.PRODUCT_NAME;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.VENDOR_ID;
 
 public class DiameterCE implements DiameterFlow {
     private static final List<Avp> AVPS;
@@ -33,18 +32,13 @@ public class DiameterCE implements DiameterFlow {
 
     @Override
     public Buffer getNextMessage() { // Changed return type
-        DiameterMessageHeader header = new DiameterMessageHeader.Builder(DiameterCommandCode.CE).setApplicationId(0)
+        DiameterMessageHeader header = new DiameterMessageHeader.Builder(CommandCode.CE).setApplicationId(0)
                 .setRequest()
                 .setHopByHopId(RANDOM.nextLong())
                 .setEndToEndId(RANDOM.nextLong())
                 .build();
 
-        // Convert DiameterMessage to ByteBuffer first, then to Vert.x Buffer
-        ByteBuffer byteBuffer = ByteBuffer.allocate(8192);
-        new DiameterMessage(header, AVPS).convertToByteBuffer(byteBuffer);
-        byteBuffer.flip(); // Prepare ByteBuffer for reading
-        Buffer buffer = Buffer.buffer(byteBuffer); // Convert ByteBuffer to Vert.x Buffer
-        return buffer;
+        return writeMessageToBuffer(new DiameterMessage(header, AVPS));
     }
 
     @Override
