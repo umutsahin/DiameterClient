@@ -10,7 +10,8 @@ dependencies {
     implementation("jakarta.xml.bind:jakarta.xml.bind-api:4.0.1")
     implementation project(":diameter")
     implementation("io.vertx:vertx-core:4.5.15")
-//    implementation("io.vertx:vertx-client:4.4.6")
+    implementation 'org.jline:jline:3.30.0'
+    implementation 'org.jline:jline-terminal-jni:3.30.0'
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.7.0'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
 }

@@ -1,5 +1,6 @@
 package com.optiva;
 
+import com.optiva.console.Console;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
@@ -45,10 +46,10 @@ public class DiameterClientVerticle extends AbstractVerticle {
             .setReconnectAttempts(0);
         this.client = vertx.createNetClient(options);
 
-        System.out.println("DiameterClientVerticle starting. Connecting to " + serverHost + ":" + serverPort + " with " + socketCount + " sockets.");
+        Console.log("DiameterClientVerticle starting. Connecting to " + serverHost + ":" + serverPort + " with " + socketCount + " sockets.");
 
         if (socketCount == 0) {
-            System.out.println("Socket count is 0. DiameterClientVerticle started without connections.");
+            Console.log("Socket count is 0. DiameterClientVerticle started without connections.");
             this.startPromiseInternal.complete();
             return;
         }
@@ -63,7 +64,7 @@ public class DiameterClientVerticle extends AbstractVerticle {
             if (res.succeeded()) {
                 NetSocket socket = res.result();
                 sockets.add(socket);
-                System.out.println("Successfully connected socket: " + socket.writeHandlerID() + ". Total sockets: " + sockets.size());
+                Console.log("Successfully connected socket: " + socket.writeHandlerID() + ". Total sockets: " + sockets.size());
 
                 // Default handler - will be overridden by sendWithResponseHandler
                 socket.handler(buffer -> {
@@ -71,19 +72,19 @@ public class DiameterClientVerticle extends AbstractVerticle {
                     if (specificHandler != null) {
                         specificHandler.handle(buffer);
                     } else {
-                        System.out.println("Received data from " + socket.writeHandlerID() + " but no specific handler: " + buffer.length() + " bytes");
+                        Console.log("Received data from " + socket.writeHandlerID() + " but no specific handler: " + buffer.length() + " bytes");
                     }
                 });
 
                 socket.closeHandler(v -> {
-                    System.out.println("Socket closed: " + socket.writeHandlerID());
+                    Console.log("Socket closed: " + socket.writeHandlerID());
                     sockets.remove(socket);
                     responseHandlers.remove(socket);
                     // Optional: Reconnect logic
                 });
 
                 socket.exceptionHandler(e -> {
-                    System.err.println("Socket exception for " + socket.writeHandlerID() + ": " + e.getMessage());
+                    Console.error("Socket exception for " + socket.writeHandlerID() + ": " + e.getMessage());
                     sockets.remove(socket);
                     responseHandlers.remove(socket);
                 });
@@ -92,14 +93,14 @@ public class DiameterClientVerticle extends AbstractVerticle {
                     if (sockets.size() >= 1) { // Consider successful if at least one connection is made
                         startPromiseInternal.complete();
                     } else if (index == totalToConnect - 1) { // Last attempt and still no success
-                        System.err.println("Failed to connect any initial sockets after all attempts.");
+                        Console.error("Failed to connect any initial sockets after all attempts.");
                         startPromiseInternal.fail("Failed to connect any initial sockets.");
                     }
                 }
             } else {
-                System.err.println("Failed to connect socket attempt " + index + ": " + res.cause().getMessage());
+                Console.error("Failed to connect socket attempt " + index + ": " + res.cause().getMessage());
                 if (!startPromiseInternal.future().isComplete() && index == totalToConnect - 1 && sockets.isEmpty()) {
-                    System.err.println("Failed to connect any initial sockets after all attempts (last attempt failed).");
+                    Console.error("Failed to connect any initial sockets after all attempts (last attempt failed).");
                     startPromiseInternal.fail("Failed to connect any initial sockets.");
                 }
             }
@@ -122,7 +123,7 @@ public class DiameterClientVerticle extends AbstractVerticle {
             if (writeOp.succeeded()) {
                 writePromise.complete();
             } else {
-                System.err.println("Failed to write message to socket " + selectedSocket.writeHandlerID() + ": " + writeOp.cause().getMessage());
+                Console.error("Failed to write message to socket " + selectedSocket.writeHandlerID() + ": " + writeOp.cause().getMessage());
                 responseHandlers.remove(selectedSocket); // Clean up handler on write failure
                 writePromise.fail(writeOp.cause());
             }
@@ -133,7 +134,7 @@ public class DiameterClientVerticle extends AbstractVerticle {
 
     @Override
     public void stop(Promise<Void> stopPromise) {
-        System.out.println("DiameterClientVerticle stopping. Closing " + sockets.size() + " sockets.");
+        Console.log("DiameterClientVerticle stopping. Closing " + sockets.size() + " sockets.");
         responseHandlers.clear();
         List<Future<Void>> closeFutures = sockets.stream().map(s -> {
             Promise<Void> promise = Promise.promise();
@@ -146,9 +147,9 @@ public class DiameterClientVerticle extends AbstractVerticle {
             if (client != null) {
                 client.close(clientCloseRes -> {
                     if (clientCloseRes.succeeded()) {
-                        System.out.println("NetClient closed successfully.");
+                        Console.log("NetClient closed successfully.");
                     } else {
-                        System.err.println("NetClient close failed: " + clientCloseRes.cause());
+                        Console.error("NetClient close failed: " + clientCloseRes.cause());
                     }
                     stopPromise.complete();
                 });

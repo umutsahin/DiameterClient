@@ -1,6 +1,7 @@
 package com.optiva;
 
 import com.optiva.charging.openapi.diameter.DiameterMessage;
+import com.optiva.console.Console;
 import com.optiva.flows.DiameterFlow;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
@@ -30,10 +31,10 @@ public class DiameterFlowExecutor {
 
         return flowPromise.future().eventually(v -> {
             activeFlowsCounter.decrementAndGet();
-            System.out.println("Active flows after decrement: "
-                               + activeFlowsCounter.get()
-                               + " for flow "
-                               + flow.getKey());
+            Console.log("Active flows after decrement: "
+                        + activeFlowsCounter.get()
+                        + " for flow "
+                        + flow.getKey());
             return Future.succeededFuture();
         });
     }
@@ -43,7 +44,7 @@ public class DiameterFlowExecutor {
 
         if (messageToSend == null) {
             // Flow is complete by its own definition (no more messages)
-            System.out.println("Flow "
+            Console.log("Flow "
                                + currentFlow.getKey()
                                + " completed (getNextMessage returned null before send).");
             overallFlowPromise.tryComplete(); // Use tryComplete in case it was failed by a previous error
@@ -54,12 +55,12 @@ public class DiameterFlowExecutor {
             // 1. Parse responseBuffer to DiameterMessage
             DiameterMessage responseMessage = parseBufferToDiameterMessage(responseBuffer);
             if (responseMessage == null) {
-                System.err.println("Failed to parse response for flow " + currentFlow.getKey());
+                Console.error("Failed to parse response for flow " + currentFlow.getKey());
                 overallFlowPromise.tryFail("Response parsing failed for flow " + currentFlow.getKey());
                 return;
             }
 
-            System.out.println("Received response for flow "
+            Console.log("Received response for flow "
                                + currentFlow.getKey()
                                + ", Command: "
                                + responseMessage.getHeader().getCommandCode()
@@ -75,7 +76,7 @@ public class DiameterFlowExecutor {
             }
 
         }).onFailure(err -> {
-            System.err.println("Failed to send message or handle response for flow "
+            Console.error("Failed to send message or handle response for flow "
                                + currentFlow.getKey()
                                + ": "
                                + err.getMessage());
@@ -85,13 +86,13 @@ public class DiameterFlowExecutor {
 
     private DiameterMessage parseBufferToDiameterMessage(Buffer buffer) {
         if (buffer == null || buffer.length() == 0) {
-            System.err.println("Cannot parse null or empty buffer to DiameterMessage.");
+            Console.error("Cannot parse null or empty buffer to DiameterMessage.");
             return null;
         }
         try {
             return new DiameterMessage(((BufferImpl) buffer).byteBuf());
         } catch (Exception e) {
-            System.err.println("Error parsing Buffer to DiameterMessage: " + e.getMessage());
+            Console.error("Error parsing Buffer to DiameterMessage: " + e.getMessage());
             return null;
         }
     }
