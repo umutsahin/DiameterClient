@@ -12,6 +12,7 @@ import io.vertx.core.json.JsonObject;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 public class MainVerticle extends AbstractVerticle {
     private int currentTps = 0;
@@ -20,7 +21,6 @@ public class MainVerticle extends AbstractVerticle {
     private final AtomicInteger activeFlows = new AtomicInteger(0);
 
     private DiameterClientVerticle clientVerticle;
-    // private DiameterFlowExecutor flowExecutor; // Commented out, to be replaced by MessageScheduler
     private MessageScheduler messageScheduler;
     private final Random random = new Random(); // For generating flow parameters
 
@@ -32,6 +32,10 @@ public class MainVerticle extends AbstractVerticle {
     // Configuration for DiameterFBC flow instances
     private int fbcMessageCount = 4; // Example: 3 messages per FBC flow (CCR-I, CCR-U, CCR-T)
     private int fbcRatingGroup = 16;
+    private final Supplier<DiameterFlow> flowGenerator = () -> {
+        String msisdn = "447400000" + String.format("%04d", random.nextInt(1000));
+        return new DiameterFBC(msisdn, fbcRatingGroup, fbcMessageCount);
+    };
 
     @Override
     public void start(Promise<Void> startPromise) {
@@ -53,19 +57,9 @@ public class MainVerticle extends AbstractVerticle {
         vertx.deployVerticle(clientVerticle, clientOptions, deployRes -> {
             if (deployRes.succeeded()) {
                 Console.log("DiameterClientVerticle deployed successfully with ID: " + deployRes.result());
-                // Initialize DiameterFlowExecutor once DiameterClientVerticle is ready
-                // We need to pass the instance of the deployed verticle, not a new one.
-                // However, direct instance passing is tricky if it's a different Vert.x context or for scalability.
-                // For now, assuming clientVerticle is the correct, deployed instance accessible here.
-                // A better way for inter-verticle communication is often the event bus.
-                // But for direct method calls within the same JVM and Vert.x instance, this can work.
-                // flowExecutor = new DiameterFlowExecutor(clientVerticle, activeFlows); // Commented out
-
-                // Initialize MessageScheduler
-                this.messageScheduler = new MessageScheduler(vertx, this.clientVerticle, this.activeFlows);
+                this.messageScheduler = new MessageScheduler(vertx, clientVerticle, activeFlows, flowGenerator);
                 Console.log("MessageScheduler initialized.");
-
-                new Thread(this::handleStdIn).start(); // Start handling stdin commands
+                new Thread(this::handleStdIn, "Console-Thread").start();
                 startPromise.complete();
             } else {
                 Console.error("Failed to deploy DiameterClientVerticle: " + deployRes.cause());
@@ -76,7 +70,7 @@ public class MainVerticle extends AbstractVerticle {
 
     private void handleStdIn() {
         while (!shuttingDown.get()) {
-            String line = Console.readLine(PROMPT);
+            String line = Console.readPrompt();
             if (line == null && shuttingDown.get()) {
                 break;
             }
@@ -90,6 +84,7 @@ public class MainVerticle extends AbstractVerticle {
             }
 
             switch (parts[0].toLowerCase()) {
+                case "single" -> messageScheduler.singleFlow(flowGenerator.get());
                 case "rps" -> {
                     if (shuttingDown.get()) {
                         Console.log("Shutdown in progress. Cannot change RPS.");
@@ -126,60 +121,49 @@ public class MainVerticle extends AbstractVerticle {
                         Console.warn("Invalid debug value: " + parts[1]);
                     }
                 }
-                case "shutdown" -> initiateShutdown();
+                case "exit" -> initiateShutdown();
                 default -> Console.error("Unknown command: " + line);
             }
         }
     }
 
     private void adjustRps(int newTps) {
-        Console.log("Adjusting RPS to " + newTps + ". Active flows: " + activeFlows.get());
-        this.currentTps = newTps; // Keep for reference
-
-        // Cancel any old MainVerticle timer for flow creation (if any remnants)
+        if (currentTps == newTps) {
+            Console.log("RPS did not change. Active flows: " + activeFlows.get());
+            return;
+        }
+        Console.log("Adjusting RPS from " + currentTps + " to " + newTps + ". Active flows: " + activeFlows.get());
         if (timerId != -1) {
             vertx.cancelTimer(timerId);
             timerId = -1;
         }
-
         if (this.messageScheduler == null) {
             Console.error("MessageScheduler not initialized. Cannot adjust RPS.");
             return;
         }
 
-        // fbcMessageCount check - still relevant for flow creation, but scheduler controls message rate
-        if (fbcMessageCount <= 0 && newTps > 0) { // Only matters if we are trying to create flows
-            Console.error("fbcMessageCount must be positive to create new flows. RPS will not be adjusted upwards with new flows.");
-            // Allow setting RPS to 0 even if fbcMessageCount is invalid
-            if (newTps > 0) return;
-        }
-
-        this.messageScheduler.setRps(newTps); // MessageScheduler handles its own timer based on messages
-
+        this.messageScheduler.setRps(newTps);
         if (newTps > 0 && !shuttingDown.get()) {
-            // The previous logic for fbcMessageCount <= 0 check is moved up
-            // to prevent scheduling flows if fbcMessageCount is invalid.
-            // If it was already checked and returned, this part won't be reached for newTps > 0.
-
-            Console.log("Populating MessageScheduler with up to " + newTps + " new flows. Target message RPS: " + newTps);
-            // This loop creates 'newTps' initial flows. The MessageScheduler will then pace their messages.
-            // The number of flows here is more about ensuring enough "work" is in the scheduler's queue.
-            for (int i = 0; i < newTps; i++) {
+            Console.log("Populating MessageScheduler with up to "
+                        + newTps
+                        + " new flows. Target message RPS: "
+                        + newTps);
+            for (int i = currentTps; i < newTps; i++) {
                 if (shuttingDown.get()) {
                     Console.log("Shutdown initiated, stopping flow population.");
                     break;
                 }
-                String msisdn = "447400000" + String.format("%04d", random.nextInt(1000));
-                DiameterFlow flow = new DiameterFBC(msisdn, fbcRatingGroup, fbcMessageCount);
-                this.messageScheduler.scheduleFlow(flow);
+                this.messageScheduler.scheduleFlow();
             }
-            Console.log("Finished populating MessageScheduler. It will manage " + activeFlows.get() + " active flows to achieve target message RPS.");
+            Console.log("Finished populating MessageScheduler. It will manage "
+                        + activeFlows.get()
+                        + " active flows to achieve target message RPS.");
 
         } else if (newTps == 0) {
-            Console.debug("RPS set to 0. MessageScheduler will stop dispatching messages. Active flows: " + activeFlows.get());
-            // messageScheduler.setRps(0) already called
+            Console.debug("RPS set to 0. MessageScheduler will stop dispatching messages. Active flows: "
+                          + activeFlows.get());
         }
-        // The old vertx.setPeriodic() for flowExecutor.executeFlow() is removed.
+        this.currentTps = newTps;
     }
 
     private void initiateShutdown() {
@@ -268,14 +252,6 @@ public class MainVerticle extends AbstractVerticle {
             });
         }
     }
-
-    private static final String PROMPT = """
-                                         ================================================================================
-                                         Commands:
-                                         * rps [n]     : request per second
-                                         * debug [0|1] : enable/disable debug logs
-                                         * shutdown    : graceful shutdown
-                                         command>\s""";
 
     public static void main(String[] args) {
         Vertx vertx = Vertx.vertx();

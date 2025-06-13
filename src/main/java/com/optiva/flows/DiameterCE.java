@@ -15,7 +15,7 @@ import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTab
 import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.PRODUCT_NAME;
 import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.VENDOR_ID;
 
-public class DiameterCE implements DiameterFlow {
+public class DiameterCE extends DiameterFlow {
     private static final List<Avp> AVPS;
 
     static {
@@ -42,13 +42,17 @@ public class DiameterCE implements DiameterFlow {
     }
 
     @Override
-    public boolean isInitialized() {
-        return false;
+    public boolean isInProgress() {
+        return true;
     }
 
     @Override
-    public DiameterFlow terminate() {
-        return this;
+    public void iterateFlow() {
+
+    }
+
+    @Override
+    public void terminateFlow() {
     }
 
     @Override

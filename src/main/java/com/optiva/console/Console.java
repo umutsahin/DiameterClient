@@ -2,6 +2,7 @@ package com.optiva.console;
 
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
+import org.jline.reader.impl.completer.StringsCompleter;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.jline.utils.AttributedString;
@@ -9,10 +10,12 @@ import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.ConsoleHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 public class Console {
 
@@ -31,7 +34,8 @@ public class Console {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        READER = LineReaderBuilder.builder().terminal(terminal).build();
+        StringsCompleter completer = new StringsCompleter("single", "rps", "debug", "exit");
+        READER = LineReaderBuilder.builder().terminal(terminal).completer(completer).build();
     }
 
     public static void log(String message) {
@@ -64,9 +68,9 @@ public class Console {
         READER.printAbove(attrMessage);
     }
 
-    public static String readLine(String prompt) {
+    public static String readPrompt() {
         try {
-            return READER.readLine(prompt);
+            return READER.readLine(PROMPT);
         } catch (Exception ignored) {
             // ignored
         }
@@ -85,4 +89,43 @@ public class Console {
     public static void setLevel(int level) {
         LEVEL.set(level);
     }
+
+    record Command(String command, List<String> parameters, String listItem, String description) {
+        Command(String command, List<String> parameters, String description) {
+            this(command, parameters, parameters.isEmpty() ? command : command + " " + String.join(" ", parameters), description);
+        }
+    }
+
+    private static final List<Command> COMMANDS = List.of(new Command("single", List.of(), "runs single session"),
+                                                          new Command("rps", List.of("[n]"), "request per second"),
+                                                          new Command("debug",
+                                                                      List.of("[0|1]"),
+                                                                      "enable/disable debug logs"),
+                                                          new Command("exit", List.of(), "graceful shutdown")
+    );
+
+    private static final String PROMPT_PREFIX = """
+                                         ================================================================================
+                                         Commands:
+                                         """;
+
+    private static final String PROMPT_SUFFIX = "command> ";
+
+    public static String constructCommandsPrompt() {
+        Integer maxLength = COMMANDS.stream()
+                .map(c -> c.listItem().length())
+                .max(Integer::compareTo)
+                .orElseThrow(() -> new RuntimeException("No commands found"));
+        return COMMANDS.stream()
+                .map(c -> "* "
+                          + c.listItem()
+                          + " ".repeat(maxLength - c.listItem().length() + 1)
+                          + ": "
+                          + c.description()
+                          + System.lineSeparator())
+                .collect(Collectors.joining());
+
+    }
+
+    private static final String PROMPT = PROMPT_PREFIX + constructCommandsPrompt() + PROMPT_SUFFIX;
 }
