@@ -20,7 +20,7 @@ dependencies {
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
 
     // OpenTelemetry
-    implementation(platform("io.opentelemetry:opentelemetry-bom:1.32.0"))
+    implementation(platform("io.opentelemetry:opentelemetry-bom:1.51.0"))
     implementation("io.opentelemetry:opentelemetry-api")
     implementation("io.opentelemetry:opentelemetry-sdk")
     implementation("io.opentelemetry:opentelemetry-exporter-otlp")

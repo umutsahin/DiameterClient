@@ -1,6 +1,5 @@
 package com.optiva;
 
-import com.optiva.OpenTelemetryConfig; // Add this
 import com.optiva.charging.openapi.diameter.DiameterMessage;
 import com.optiva.console.Console;
 import com.optiva.flows.DiameterFlow;
@@ -22,11 +21,12 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static com.optiva.OpenTelemetryConfig.messagesSentCounter;
+
 public class DiameterClientVerticle extends AbstractVerticle {
 
     private String serverHost = "127.0.0.1";
     private int serverPort = 3868;
-    private int socketCount = 1;
 
     private NetClient client;
     private final AtomicInteger roundRobinCounter = new AtomicInteger(0);
@@ -40,7 +40,7 @@ public class DiameterClientVerticle extends AbstractVerticle {
         this.startPromiseInternal = startPromise;
         this.serverHost = config().getString("serverHost", "127.0.0.1");
         this.serverPort = config().getInteger("serverPort", 3868);
-        this.socketCount = config().getInteger("socketCount", 1);
+        int socketCount = config().getInteger("socketCount", 1);
 
         NetClientOptions options = new NetClientOptions().setConnectTimeout(10000).setReconnectAttempts(0);
         this.client = vertx.createNetClient(options);
@@ -70,7 +70,7 @@ public class DiameterClientVerticle extends AbstractVerticle {
                 NetSocket socket = res.result();
                 sockets.add(socket);
                 Console.debug("Successfully connected socket: "
-                              + socket.writeHandlerID()
+                              + socketAddress(socket)
                               + ". Total sockets: "
                               + sockets.size());
 
@@ -94,7 +94,7 @@ public class DiameterClientVerticle extends AbstractVerticle {
                             specificHandler.handle(responseMessage);
                         } else {
                             Console.debug("Received data from "
-                                          + socket.writeHandlerID()
+                                          + socketAddress(socket)
                                           + " with FlowKey "
                                           + flowKey
                                           + " but no specific handler.");
@@ -105,7 +105,7 @@ public class DiameterClientVerticle extends AbstractVerticle {
                         }
                     } else {
                         Console.debug("Received data from "
-                                      + socket.writeHandlerID()
+                                      + socketAddress(socket)
                                       + " with FlowKey "
                                       + flowKey
                                       + " but no handlers registered for this socket.");
@@ -151,7 +151,6 @@ public class DiameterClientVerticle extends AbstractVerticle {
         flowToSocketMap.keySet().removeAll(flowsToBeCleaned);
     }
 
-    // Send message and expect a response on the same socket, handled by responseHandler
     public Future<Void> sendWithResponseHandler(Buffer message,
                                                 String flowKey,
                                                 Handler<DiameterMessage> responseHandler) {
@@ -176,8 +175,7 @@ public class DiameterClientVerticle extends AbstractVerticle {
         selectedSocket.write(message, writeOp -> {
             if (writeOp.succeeded()) {
                 writePromise.complete();
-                // Increment messages.sent counter
-                OpenTelemetryConfig.getMessagesSentCounter().add(1); // Add this line
+                messagesSentCounter.add(1);
             } else {
                 Console.error("Failed to write message to socket "
                               + socketAddress(selectedSocket)
@@ -233,7 +231,7 @@ public class DiameterClientVerticle extends AbstractVerticle {
             return existingSocket;
         } else {
             if (existingSocket != null) {
-                Console.debug("Cleaning up stale socket " + existingSocket.writeHandlerID() + " for flowKey: " + flowKey);
+                Console.debug("Cleaning up stale socket " + socketAddress(existingSocket) + " for flowKey: " + flowKey);
                 flowToSocketMap.remove(flowKey, existingSocket);
             }
 

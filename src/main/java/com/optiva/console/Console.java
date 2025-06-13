@@ -1,9 +1,8 @@
 package com.optiva.console;
 
-import com.optiva.OpenTelemetryConfig; // Add this
-import io.opentelemetry.api.logs.Severity; // Add this
-import io.opentelemetry.api.trace.Span; // Add this
-import io.opentelemetry.context.Context; // Add this
+import com.optiva.OpenTelemetryConfig;
+import io.opentelemetry.api.logs.Severity;
+import io.opentelemetry.context.Context;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.jline.reader.impl.completer.StringsCompleter;
@@ -14,11 +13,11 @@ import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.ConsoleHandler;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 public class Console {
@@ -47,6 +46,12 @@ public class Console {
     }
 
     public static void debug(String message) {
+        OpenTelemetryConfig.otelLogger.logRecordBuilder()
+                .setTimestamp(Instant.now())
+                .setBody(message)
+                .setSeverity(Severity.DEBUG)
+                .setContext(Context.current())
+                .emit();
         if (LEVEL.get() > 0) {
             // Original JLine logging
             AttributedString attrMessage = new AttributedStringBuilder().style(ITALIC_MAGENTA)
@@ -54,17 +59,6 @@ public class Console {
                     .style(AttributedStyle.DEFAULT)
                     .toAttributedString();
             READER.printAbove(attrMessage);
-
-            // OpenTelemetry Logging
-            io.opentelemetry.api.logs.Logger otelLogger = OpenTelemetryConfig.getOtelLogger();
-            if (otelLogger != null) {
-                otelLogger.logRecordBuilder()
-                    .setBody(message)
-                    .setSeverity(Severity.DEBUG)
-                    // Associate with current span if any
-                    .setContext(Context.current()) // This carries the current SpanContext
-                    .emit();
-            }
         }
     }
 
@@ -97,7 +91,7 @@ public class Console {
         ConsoleHandler handler = new ConsoleHandler();
         handler.setLevel(Level.FINE);
 
-        Logger logger = Logger.getLogger("org.jline");
+        java.util.logging.Logger logger = java.util.logging.Logger.getLogger("org.jline");
         logger.setLevel(Level.FINE);
         logger.addHandler(handler);
     }
@@ -108,7 +102,12 @@ public class Console {
 
     record Command(String command, List<String> parameters, String listItem, String description) {
         Command(String command, List<String> parameters, String description) {
-            this(command, parameters, parameters.isEmpty() ? command : command + " " + String.join(" ", parameters), description);
+            this(command,
+                 parameters,
+                 parameters.isEmpty()
+                 ? command
+                 : command + " " + String.join(" ", parameters),
+                 description);
         }
     }
 
@@ -117,13 +116,12 @@ public class Console {
                                                           new Command("debug",
                                                                       List.of("[0|1]"),
                                                                       "enable/disable debug logs"),
-                                                          new Command("exit", List.of(), "graceful shutdown")
-    );
+                                                          new Command("exit", List.of(), "graceful shutdown"));
 
     private static final String PROMPT_PREFIX = """
-                                         ================================================================================
-                                         Commands:
-                                         """;
+                                                ================================================================================
+                                                Commands:
+                                                """;
 
     private static final String PROMPT_SUFFIX = "command> ";
 

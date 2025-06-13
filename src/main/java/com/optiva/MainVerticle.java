@@ -6,6 +6,7 @@ import com.optiva.OpenTelemetryConfig;
 import com.optiva.console.Console;
 import com.optiva.flows.DiameterFBC;
 import com.optiva.flows.DiameterFlow;
+import io.opentelemetry.api.logs.Logger;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Promise;
@@ -257,6 +258,7 @@ public class MainVerticle extends AbstractVerticle {
     }
 
     public static void main(String[] args) {
+        Console.debug("Starting application...");
         Vertx vertx = Vertx.vertx();
         DeploymentOptions mainOptions = new DeploymentOptions().setConfig(new JsonObject()
                                                                           // Example: Pass configuration to MainVerticle if needed from main()
