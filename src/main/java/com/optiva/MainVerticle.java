@@ -20,7 +20,8 @@ public class MainVerticle extends AbstractVerticle {
     private final AtomicInteger activeFlows = new AtomicInteger(0);
 
     private DiameterClientVerticle clientVerticle;
-    private DiameterFlowExecutor flowExecutor;
+    // private DiameterFlowExecutor flowExecutor; // Commented out, to be replaced by MessageScheduler
+    private MessageScheduler messageScheduler;
     private final Random random = new Random(); // For generating flow parameters
 
     // Configuration for DiameterClientVerticle
@@ -58,7 +59,11 @@ public class MainVerticle extends AbstractVerticle {
                 // For now, assuming clientVerticle is the correct, deployed instance accessible here.
                 // A better way for inter-verticle communication is often the event bus.
                 // But for direct method calls within the same JVM and Vert.x instance, this can work.
-                flowExecutor = new DiameterFlowExecutor(clientVerticle, activeFlows);
+                // flowExecutor = new DiameterFlowExecutor(clientVerticle, activeFlows); // Commented out
+
+                // Initialize MessageScheduler
+                this.messageScheduler = new MessageScheduler(vertx, this.clientVerticle, this.activeFlows);
+                Console.log("MessageScheduler initialized.");
 
                 new Thread(this::handleStdIn).start(); // Start handling stdin commands
                 startPromise.complete();
@@ -129,51 +134,52 @@ public class MainVerticle extends AbstractVerticle {
 
     private void adjustRps(int newTps) {
         Console.log("Adjusting RPS to " + newTps + ". Active flows: " + activeFlows.get());
-        this.currentTps = newTps;
+        this.currentTps = newTps; // Keep for reference
 
+        // Cancel any old MainVerticle timer for flow creation (if any remnants)
         if (timerId != -1) {
             vertx.cancelTimer(timerId);
             timerId = -1;
         }
 
-        if (currentTps > 0 && !shuttingDown.get()) {
-            if (flowExecutor == null) {
-                Console.error("Flow Executor not initialized yet. Cannot start RPS.");
-                return;
-            }
-            // Calculate interval ensuring it's at least 1ms to avoid issues with 0ms interval
-            long interval = Math.max(1, 1000 / currentTps);
-            timerId = vertx.setPeriodic(interval, id -> {
-                if (shuttingDown.get()) {
-                    vertx.cancelTimer(id);
-                    return;
-                }
+        if (this.messageScheduler == null) {
+            Console.error("MessageScheduler not initialized. Cannot adjust RPS.");
+            return;
+        }
 
-                // Create and execute a new DiameterFBC flow
+        // fbcMessageCount check - still relevant for flow creation, but scheduler controls message rate
+        if (fbcMessageCount <= 0 && newTps > 0) { // Only matters if we are trying to create flows
+            Console.error("fbcMessageCount must be positive to create new flows. RPS will not be adjusted upwards with new flows.");
+            // Allow setting RPS to 0 even if fbcMessageCount is invalid
+            if (newTps > 0) return;
+        }
+
+        this.messageScheduler.setRps(newTps); // MessageScheduler handles its own timer based on messages
+
+        if (newTps > 0 && !shuttingDown.get()) {
+            // The previous logic for fbcMessageCount <= 0 check is moved up
+            // to prevent scheduling flows if fbcMessageCount is invalid.
+            // If it was already checked and returned, this part won't be reached for newTps > 0.
+
+            Console.log("Populating MessageScheduler with up to " + newTps + " new flows. Target message RPS: " + newTps);
+            // This loop creates 'newTps' initial flows. The MessageScheduler will then pace their messages.
+            // The number of flows here is more about ensuring enough "work" is in the scheduler's queue.
+            for (int i = 0; i < newTps; i++) {
+                if (shuttingDown.get()) {
+                    Console.log("Shutdown initiated, stopping flow population.");
+                    break;
+                }
                 String msisdn = "447400000" + String.format("%04d", random.nextInt(1000));
                 DiameterFlow flow = new DiameterFBC(msisdn, fbcRatingGroup, fbcMessageCount);
+                this.messageScheduler.scheduleFlow(flow);
+            }
+            Console.log("Finished populating MessageScheduler. It will manage " + activeFlows.get() + " active flows to achieve target message RPS.");
 
-                Console.log("MainVerticle: Triggering new flow "
-                            + flow.getKey()
-                            + ". Current RPS: "
-                            + currentTps
-                            + ". Active flows: "
-                            + activeFlows.get());
-
-                flowExecutor.executeFlow(flow).onComplete(ar -> {
-                    if (ar.failed()) {
-                        Console.error("Flow " + flow.getKey() + " execution failed: " + ar.cause().getMessage());
-                        // Optionally, log ar.cause() for more details
-                    } else {
-                        // Console.log("Flow " + flow.getKey() + " completed successfully.");
-                    }
-                    // activeFlows counter is decremented within flowExecutor's eventually block
-                    // Console.log("Active flows after completion/failure: " + activeFlows.get());
-                });
-            });
-        } else if (currentTps == 0) {
-            Console.debug("RPS set to 0. No load will be generated. Active flows: " + activeFlows.get());
+        } else if (newTps == 0) {
+            Console.debug("RPS set to 0. MessageScheduler will stop dispatching messages. Active flows: " + activeFlows.get());
+            // messageScheduler.setRps(0) already called
         }
+        // The old vertx.setPeriodic() for flowExecutor.executeFlow() is removed.
     }
 
     private void initiateShutdown() {

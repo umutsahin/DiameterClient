@@ -14,6 +14,8 @@ public interface DiameterFlow {
 
     Buffer getNextMessage();
 
+    void processResponse(com.optiva.charging.openapi.diameter.DiameterMessage responseMessage);
+
     boolean isInitialized();
 
     DiameterFlow terminate();

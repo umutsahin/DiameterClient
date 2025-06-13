@@ -43,47 +43,138 @@ import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTab
 import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.TGPP.REPORTING_REASON;
 import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.TGPP.SERVICE_INFORMATION;
 import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.TGPP.TGPP_USER_LOCATION_INFO;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.RESULT_CODE; // Import RESULT_CODE
 import static jakarta.xml.bind.DatatypeConverter.parseHexBinary;
 
 public class DiameterFBC implements DiameterFlow {
 
+    private enum FlowState {
+        INITIAL, // Ready to send CCR-I
+        UPDATE,  // Ready to send CCR-U
+        TERMINATE, // Ready to send CCR-T
+        COMPLETED, // Successfully finished
+        FAILED     // Failed due to error response
+    }
+
     private static final List<Avp> STATIC_AVPS = staticAvps();
     private final String msisdn;
     private final int ratingGroup;
-    private final int messageCount;
+    private final int totalMessagesInSequence; // e.g. if MainVerticle.fbcMessageCount is 4, this is 4. (I, U, U, T)
     private final String session;
     private final ThreadLocalRandom random = ThreadLocalRandom.current();
-    private int requestNumber;
 
-    public DiameterFBC(String msisdn, int ratingGroup, int messageCount) {
+    private int currentMessageIndex; // 0 for CCR-I, 1 for first CCR-U, etc. up to totalMessagesInSequence - 1 for CCR-T
+    private FlowState currentState;
+
+    public DiameterFBC(String msisdn, int ratingGroup, int totalMessagesInSequence) {
         this.msisdn = msisdn;
         this.ratingGroup = ratingGroup;
-        this.messageCount = messageCount;
+        // totalMessagesInSequence is the "fbcMessageCount" from MainVerticle.
+        // It represents the total number of messages in this flow instance (I, U..., T).
+        this.totalMessagesInSequence = totalMessagesInSequence;
         this.session = UUID.randomUUID().toString();
-        this.requestNumber = 1;
+        this.currentMessageIndex = 0; // Start with the first message (CCR-I)
+        this.currentState = FlowState.INITIAL;
     }
 
     @Override
-    public Buffer getNextMessage() { // Changed return type
-        if (requestNumber == 1) {
-            return ccrIMessage();
-        } else if (requestNumber > 1 && requestNumber < messageCount) {
-            return ccrURequest();
-        } else if (requestNumber == messageCount) {
-            return ccrTRequest();
+    public Buffer getNextMessage() {
+        if (currentState == FlowState.INITIAL && currentMessageIndex == 0) {
+            // This is CCR-I, CC_REQUEST_TYPE = 1
+            return ccrMessage(1, true, 0);
+        } else if (currentState == FlowState.UPDATE && currentMessageIndex > 0 && currentMessageIndex < totalMessagesInSequence - 1) {
+            // This is CCR-U, CC_REQUEST_TYPE = 2
+            // currentMessageIndex maps to CC_REQUEST_NUMBER (0-based for index, 0-based for req number in Diameter)
+            return ccrMessage(2, true, 1000L);
+        } else if (currentState == FlowState.TERMINATE && currentMessageIndex == totalMessagesInSequence - 1) {
+            // This is CCR-T, CC_REQUEST_TYPE = 3
+            return ccrMessage(3, false, 1000L);
         } else {
+            // COMPLETED, FAILED, or inconsistent state
             return null;
         }
     }
 
     @Override
+    public void processResponse(DiameterMessage responseMessage) {
+        if (currentState == FlowState.COMPLETED || currentState == FlowState.FAILED) {
+            // Flow already finished, ignore further responses (should not happen with proper scheduler)
+            return;
+        }
+
+        // Check Result-Code AVP
+        Integer resultCode = responseMessage.getAvpIntValue(RESULT_CODE);
+        boolean isSuccess = resultCode != null && (resultCode >= 2000 && resultCode < 3000);
+
+        if (!isSuccess) {
+            currentState = FlowState.FAILED;
+            // Optionally log the error details from responseMessage
+            System.err.println("Flow " + session + " failed. Result-Code: " + resultCode);
+            return;
+        }
+
+        // Successful response, advance state
+        currentMessageIndex++; // Advance to next message in sequence
+
+        if (currentState == FlowState.INITIAL) { // Response to CCR-I
+            if (totalMessagesInSequence == 1) { // Only CCR-I and CCR-T (no CCR-U)
+                 currentState = FlowState.TERMINATE; // This means totalMessagesInSequence was 1, which is unusual (I then T)
+                                                  // Or if totalMessagesInSequence was 2 (I then T)
+                                                  // If totalMessagesInSequence is 1, it's I, then T. currentMessageIndex becomes 1.
+                                                  // If totalMessagesInSequence is 2, it's I, then U (no, T).
+                                                  // Let's clarify fbcMessageCount:
+                                                  // if fbcMessageCount = 1 (I), next should be T. So this becomes TERMINATE.
+                                                  // if fbcMessageCount = 2 (I, T), currentMessageIndex is now 1 (for T). -> TERMINATE
+                                                  // if fbcMessageCount = 3 (I, U, T), currentMessageIndex is now 1 (for U). -> UPDATE
+                if (currentMessageIndex == totalMessagesInSequence -1) { // if next is T
+                    currentState = FlowState.TERMINATE;
+                } else if (currentMessageIndex < totalMessagesInSequence -1 ) { // if next is U
+                    currentState = FlowState.UPDATE;
+                } else { // Should be T if only I was sent.
+                     currentState = FlowState.COMPLETED; // Or FAILED if this state is unexpected.
+                }
+
+            } else { // Has CCR-U messages
+                currentState = FlowState.UPDATE;
+            }
+        } else if (currentState == FlowState.UPDATE) { // Response to CCR-U
+            if (currentMessageIndex == totalMessagesInSequence - 1) { // All CCR-Us sent, next is CCR-T
+                currentState = FlowState.TERMINATE;
+            } else if (currentMessageIndex < totalMessagesInSequence - 1) { // More CCR-Us to send
+                currentState = FlowState.UPDATE; // Stays in UPDATE state
+            } else { // Should not happen: currentMessageIndex >= totalMessagesInSequence
+                currentState = FlowState.COMPLETED; // Or FAILED
+            }
+        } else if (currentState == FlowState.TERMINATE) { // Response to CCR-T
+            currentState = FlowState.COMPLETED;
+        }
+    }
+
+
+    @Override
     public boolean isInitialized() {
-        return requestNumber > 1;
+        // A flow is "initialized" after its first message (CCR-I) has been processed.
+        // This might mean currentMessageIndex > 0 or a specific state.
+        // Let's consider it initialized if it's past the INITIAL state.
+        return currentState != FlowState.INITIAL || currentMessageIndex > 0;
     }
 
     @Override
     public DiameterFlow terminate() {
-        requestNumber = messageCount;
+        // This method could be used to forcefully move the flow to a state where it sends CCR-T next,
+        // or mark it as FAILED/COMPLETED to stop further messages.
+        // For now, let's make it move to a state ready to send CCR-T if not already there,
+        // or directly to FAILED/COMPLETED if it's too early.
+        if (currentState != FlowState.COMPLETED && currentState != FlowState.FAILED) {
+            if (currentMessageIndex < totalMessagesInSequence -1 && totalMessagesInSequence > 0) {
+                 this.currentState = FlowState.TERMINATE;
+                 this.currentMessageIndex = totalMessagesInSequence - 1; // Set to send CCR-T
+            } else if (totalMessagesInSequence == 0) { // no messages to send at all
+                this.currentState = FlowState.COMPLETED;
+            } else { // Already in TERMINATE state or beyond
+                 this.currentState = FlowState.COMPLETED; // Or FAILED if appropriate
+            }
+        }
         return this;
     }
 
@@ -94,25 +185,18 @@ public class DiameterFBC implements DiameterFlow {
 
     @Override
     public DiameterFlow restart() {
-        return new DiameterFBC(msisdn, ratingGroup, messageCount);
+        return new DiameterFBC(msisdn, ratingGroup, totalMessagesInSequence);
     }
 
-    public Buffer ccrIMessage() { // Changed return type
+    // Consolidated message creation
+    private Buffer ccrMessage(int ccRequestType, boolean includeRequestedServiceUnit, long usedUnits) {
         DiameterMessageHeader header = headerSupplier.get();
-        return messageFunction.apply(header, dynamicAvps(1, true, 0));
+        // currentMessageIndex is 0-based for CC_REQUEST_NUMBER
+        List<Avp> avps = dynamicAvps(ccRequestType, includeRequestedServiceUnit, usedUnits, currentMessageIndex);
+        return messageFunction.apply(header, avps);
     }
 
-    public Buffer ccrURequest() { // Changed return type
-        DiameterMessageHeader header = headerSupplier.get();
-        return messageFunction.apply(header, dynamicAvps(2, true, 1000L));
-    }
-
-    public Buffer ccrTRequest() { // Changed return type
-        DiameterMessageHeader header = headerSupplier.get();
-        return messageFunction.apply(header, dynamicAvps(3, false, 1000L));
-    }
-
-    private List<Avp> dynamicAvps(int requestType, boolean request, long usedUnits) {
+    private List<Avp> dynamicAvps(int requestType, boolean request, long usedUnits, int reqNum) {
         HashMap<AvpCode, Avp> msccValue = new HashMap<>();
         msccValue.put(RATING_GROUP, RATING_GROUP.createAvp(ratingGroup));
         if (request) {
@@ -130,7 +214,7 @@ public class DiameterFBC implements DiameterFlow {
         }
         return List.of(SESSION_ID.createAvp(session),
                        EVENT_TIMESTAMP.createAvp(ZonedDateTime.now()),
-                       CC_REQUEST_NUMBER.createAvp(requestNumber++ - 1),
+                       CC_REQUEST_NUMBER.createAvp(reqNum), // Use passed reqNum
                        CC_REQUEST_TYPE.createAvp(requestType),
                        SUBSCRIPTION_ID.createAvp(Map.of(SUBSCRIPTION_ID_TYPE,
                                                         SUBSCRIPTION_ID_TYPE.createAvp(0),
