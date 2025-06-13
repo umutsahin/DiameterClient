@@ -1,12 +1,10 @@
 package com.optiva;
 
-import com.optiva.charging.openapi.diameter.DiameterMessage;
 import com.optiva.console.Console;
 import com.optiva.flows.DiameterFlow;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.buffer.Buffer;
-import io.vertx.core.buffer.impl.BufferImpl;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -31,10 +29,7 @@ public class DiameterFlowExecutor {
 
         return flowPromise.future().eventually(v -> {
             activeFlowsCounter.decrementAndGet();
-            Console.log("Active flows after decrement: "
-                        + activeFlowsCounter.get()
-                        + " for flow "
-                        + flow.getKey());
+            Console.debug("Active flows after decrement: " + activeFlowsCounter.get() + " for flow " + flow.getKey());
             return Future.succeededFuture();
         });
     }
@@ -44,76 +39,45 @@ public class DiameterFlowExecutor {
 
         if (messageToSend == null) {
             // Flow is complete by its own definition (no more messages)
-            Console.log("Flow "
-                               + currentFlow.getKey()
-                               + " completed (getNextMessage returned null before send).");
+            Console.debug("Flow " + currentFlow.getKey() + " completed.");
             overallFlowPromise.tryComplete(); // Use tryComplete in case it was failed by a previous error
             return;
         }
 
-        // Parse the outgoing message to get HopByHopID
-        DiameterMessage outgoingMessage = parseBufferToDiameterMessage(messageToSend);
-        if (outgoingMessage == null) {
-            Console.error("Failed to parse outgoing message for flow " + currentFlow.getKey() + ". Cannot extract HopByHopID.");
-            overallFlowPromise.tryFail("Outgoing message parsing failed for flow " + currentFlow.getKey());
-            return;
-        }
-        int hopByHopId = outgoingMessage.getHeader().getHopByHopId();
-
-        clientVerticle.sendWithResponseHandler(messageToSend, currentFlow.getKey(), hopByHopId, responseBuffer -> {
-            // 1. Parse responseBuffer to DiameterMessage
-            DiameterMessage responseMessage = parseBufferToDiameterMessage(responseBuffer);
-            if (responseMessage == null) {
-                Console.error("Failed to parse response for flow " + currentFlow.getKey());
-                overallFlowPromise.tryFail("Response parsing failed for flow " + currentFlow.getKey());
-                return;
-            }
-
-            Console.log("Received response for flow "
-                               + currentFlow.getKey()
-                               + ", Command: "
-                               + responseMessage.getHeader().getCommandCode()
-                               + ", HopByHop: " + responseMessage.getHeader().getHopByHopId() // Log HopByHop for verification
-                               + ", E2E: "
-                               + responseMessage.getHeader().getEndToEndId());
+        clientVerticle.sendWithResponseHandler(messageToSend, currentFlow.getKey(), responseMessage -> {
+            Console.debug("Received response for flow "
+                          + currentFlow.getKey()
+                          + ", Command: "
+                          + responseMessage.getHeader().getCommandCode()
+                          + ", HopByHop: "
+                          + responseMessage.getHeader().getHopByHopId()
+                          // Log HopByHop for verification
+                          + ", E2E: "
+                          + responseMessage.getHeader().getEndToEndId());
 
             Integer resultCode = responseMessage.<Integer>getAvpValue(RESULT_CODE);
             if (resultCode < 3000) {
-                // Before executing next step, ensure the HopByHopID of response matches request
-                // This is an additional check, main correlation is done by DiameterClientVerticle
-                if (responseMessage.getHeader().getHopByHopId() != hopByHopId) {
-                    Console.error("HopByHopID mismatch for flow " + currentFlow.getKey() +
-                                  ". Expected: " + hopByHopId +
-                                  ", Received: " + responseMessage.getHeader().getHopByHopId());
-                    // overallFlowPromise.tryFail("HopByHopID mismatch for flow " + currentFlow.getKey());
-                    // Decide if this should be a fatal flow error or just a warning.
-                    // For now, logging and continuing, as the client verticle should have routed it correctly.
+                String flowKey = DiameterFlow.getKey(responseMessage);
+                if (!currentFlow.getKey().equals(flowKey)) {
+                    Console.error("Flow mismatch." + "Expected: " + currentFlow.getKey() + ", Received: " + flowKey);
                 }
                 executeNextStep(currentFlow, overallFlowPromise); // Recursive call to handle next step or complete
             } else {
                 String errorMsg = responseMessage.getAvpValue(ERROR_MESSAGE);
-                overallFlowPromise.tryFail("Request failed with " + resultCode + ": " + errorMsg);
+                if (currentFlow.isInitialized()) {
+                    Console.error("Request failed with " + resultCode + ": " + errorMsg + ", terminating flow...");
+                    executeNextStep(currentFlow.terminate(), overallFlowPromise);
+                } else {
+                    overallFlowPromise.tryFail("Request failed with " + resultCode + ": " + errorMsg);
+                }
             }
 
         }).onFailure(err -> {
             Console.error("Failed to send message or handle response for flow "
-                               + currentFlow.getKey()
-                               + " (HopByHopID: " + hopByHopId + "): "
-                               + err.getMessage());
+                          + currentFlow.getKey()
+                          + ": "
+                          + err.getMessage());
             overallFlowPromise.tryFail(err); // Use tryFail
         });
-    }
-
-    private DiameterMessage parseBufferToDiameterMessage(Buffer buffer) {
-        if (buffer == null || buffer.length() == 0) {
-            Console.error("Cannot parse null or empty buffer to DiameterMessage.");
-            return null;
-        }
-        try {
-            return new DiameterMessage(((BufferImpl) buffer).byteBuf());
-        } catch (Exception e) {
-            Console.error("Error parsing Buffer to DiameterMessage: " + e.getMessage());
-            return null;
-        }
     }
 }

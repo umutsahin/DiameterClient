@@ -71,7 +71,7 @@ public class MainVerticle extends AbstractVerticle {
 
     private void handleStdIn() {
         while (!shuttingDown.get()) {
-            String line = Console.readLine("tps [i]/shutdown >");
+            String line = Console.readLine(PROMPT);
             if (line == null && shuttingDown.get()) {
                 break;
             }
@@ -84,33 +84,51 @@ public class MainVerticle extends AbstractVerticle {
                 continue;
             }
 
-            String command = parts[0].toLowerCase();
-            if ("tps".equals(command) && parts.length == 2) {
-                if (shuttingDown.get()) {
-                    Console.log("Shutdown in progress. Cannot change TPS.");
-                    continue;
-                }
-                try {
-                    int newTps = Integer.parseInt(parts[1]);
-                    if (newTps >= 0) {
-                        adjustTps(newTps);
-                    } else {
-                        Console.log("TPS value must be non-negative.");
+            switch (parts[0].toLowerCase()) {
+                case "rps" -> {
+                    if (shuttingDown.get()) {
+                        Console.log("Shutdown in progress. Cannot change RPS.");
+                        return;
                     }
-                } catch (NumberFormatException e) {
-                    Console.log("Invalid TPS value: " + parts[1]);
+                    if (parts.length != 2) {
+                        Console.error("rps command requires 2 arguments");
+                        return;
+                    }
+                    try {
+                        int newTps = Integer.parseInt(parts[1]);
+                        if (newTps >= 0) {
+                            adjustRps(newTps);
+                        } else {
+                            Console.warn("RPS value must be non-negative.");
+                        }
+                    } catch (NumberFormatException e) {
+                        Console.warn("Invalid RPS value: " + parts[1]);
+                    }
                 }
-            } else if ("shutdown".equals(command)) {
-                initiateShutdown();
-                break;
-            } else {
-                Console.log("Unknown command: " + line);
+                case "debug" -> {
+                    if (parts.length != 2) {
+                        Console.error("debug command requires 2 arguments");
+                        return;
+                    }
+                    try {
+                        int level = Integer.parseInt(parts[1]);
+                        if (level >= 0) {
+                            Console.setLevel(level);
+                        } else {
+                            Console.warn("debug value must be non-negative.");
+                        }
+                    } catch (NumberFormatException e) {
+                        Console.warn("Invalid debug value: " + parts[1]);
+                    }
+                }
+                case "shutdown" -> initiateShutdown();
+                default -> Console.error("Unknown command: " + line);
             }
         }
     }
 
-    private void adjustTps(int newTps) {
-        Console.log("Adjusting TPS to " + newTps + ". Active flows: " + activeFlows.get());
+    private void adjustRps(int newTps) {
+        Console.log("Adjusting RPS to " + newTps + ". Active flows: " + activeFlows.get());
         this.currentTps = newTps;
 
         if (timerId != -1) {
@@ -120,7 +138,7 @@ public class MainVerticle extends AbstractVerticle {
 
         if (currentTps > 0 && !shuttingDown.get()) {
             if (flowExecutor == null) {
-                Console.error("Flow Executor not initialized yet. Cannot start TPS.");
+                Console.error("Flow Executor not initialized yet. Cannot start RPS.");
                 return;
             }
             // Calculate interval ensuring it's at least 1ms to avoid issues with 0ms interval
@@ -137,7 +155,7 @@ public class MainVerticle extends AbstractVerticle {
 
                 Console.log("MainVerticle: Triggering new flow "
                             + flow.getKey()
-                            + ". Current TPS: "
+                            + ". Current RPS: "
                             + currentTps
                             + ". Active flows: "
                             + activeFlows.get());
@@ -154,13 +172,13 @@ public class MainVerticle extends AbstractVerticle {
                 });
             });
         } else if (currentTps == 0) {
-            Console.log("TPS set to 0. No load will be generated. Active flows: " + activeFlows.get());
+            Console.debug("RPS set to 0. No load will be generated. Active flows: " + activeFlows.get());
         }
     }
 
     private void initiateShutdown() {
         if (!shuttingDown.compareAndSet(false, true)) {
-            Console.log("Shutdown already in progress.");
+            Console.warn("Shutdown already in progress.");
             return;
         }
 
@@ -189,7 +207,7 @@ public class MainVerticle extends AbstractVerticle {
                         closeVertxInstance();
                     });
                 } else {
-                    Console.log("DiameterClientVerticle was not deployed or ID is null, skipping undeploy.");
+                    Console.error("DiameterClientVerticle was not deployed or ID is null, skipping undeploy.");
                     closeVertxInstance();
                 }
             } else {
@@ -244,6 +262,14 @@ public class MainVerticle extends AbstractVerticle {
             });
         }
     }
+
+    private static final String PROMPT = """
+                                         ================================================================================
+                                         Commands:
+                                         * rps [n]     : request per second
+                                         * debug [0|1] : enable/disable debug logs
+                                         * shutdown    : graceful shutdown
+                                         command>\s""";
 
     public static void main(String[] args) {
         Vertx vertx = Vertx.vertx();

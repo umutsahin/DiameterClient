@@ -7,10 +7,16 @@ import io.vertx.core.buffer.impl.BufferImpl;
 
 import java.util.concurrent.ThreadLocalRandom;
 
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.SESSION_ID;
+
 public interface DiameterFlow {
     ThreadLocalRandom RANDOM = ThreadLocalRandom.current();
 
-    Buffer getNextMessage(); // Changed return type
+    Buffer getNextMessage();
+
+    boolean isInitialized();
+
+    DiameterFlow terminate();
 
     String getKey();
 
@@ -21,5 +27,13 @@ public interface DiameterFlow {
         ByteBuf byteBuf = buffer.byteBuf();
         dm.convertToByteBuf(byteBuf);
         return buffer;
+    }
+
+    static String getKey(DiameterMessage dm) {
+        return switch (dm.getHeader().getCommandCode()) {
+            case CC -> dm.getAvpValue(SESSION_ID);
+            case CE -> "ce";
+            default -> throw new IllegalStateException("Unexpected value: " + dm.getHeader().getCommandCode());
+        };
     }
 }

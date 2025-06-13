@@ -42,6 +42,16 @@ public class DiameterCE implements DiameterFlow {
     }
 
     @Override
+    public boolean isInitialized() {
+        return false;
+    }
+
+    @Override
+    public DiameterFlow terminate() {
+        return this;
+    }
+
+    @Override
     public String getKey() {
         return "";
     }

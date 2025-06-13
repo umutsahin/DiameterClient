@@ -5,8 +5,6 @@ import com.optiva.charging.openapi.diameter.DiameterMessageHeader;
 import com.optiva.charging.openapi.diameter.avp.Avp;
 import com.optiva.charging.openapi.diameter.avp.AvpCode;
 import com.optiva.charging.openapi.diameter.common.enumeration.CommandCode;
-import io.netty.buffer.ByteBuf;
-import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 
 import java.time.ZonedDateTime;
@@ -79,6 +77,17 @@ public class DiameterFBC implements DiameterFlow {
     }
 
     @Override
+    public boolean isInitialized() {
+        return requestNumber > 1;
+    }
+
+    @Override
+    public DiameterFlow terminate() {
+        requestNumber = messageCount;
+        return this;
+    }
+
+    @Override
     public String getKey() {
         return session;
     }
@@ -130,8 +139,8 @@ public class DiameterFBC implements DiameterFlow {
                        MULTIPLE_SERVICES_CREDIT_CONTROL.createAvp(msccValue));
     }
 
-    private final Supplier<DiameterMessageHeader> headerSupplier = () -> new DiameterMessageHeader.Builder(
-            CommandCode.CC).setApplicationId(4)
+    private final Supplier<DiameterMessageHeader> headerSupplier
+            = () -> new DiameterMessageHeader.Builder(CommandCode.CC).setApplicationId(4)
             .setEndToEndId(random.nextLong())
             .setHopByHopId(random.nextLong())
             .setRequest()
