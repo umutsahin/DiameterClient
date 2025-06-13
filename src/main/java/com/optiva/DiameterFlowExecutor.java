@@ -51,7 +51,16 @@ public class DiameterFlowExecutor {
             return;
         }
 
-        clientVerticle.sendWithResponseHandler(messageToSend, responseBuffer -> {
+        // Parse the outgoing message to get HopByHopID
+        DiameterMessage outgoingMessage = parseBufferToDiameterMessage(messageToSend);
+        if (outgoingMessage == null) {
+            Console.error("Failed to parse outgoing message for flow " + currentFlow.getKey() + ". Cannot extract HopByHopID.");
+            overallFlowPromise.tryFail("Outgoing message parsing failed for flow " + currentFlow.getKey());
+            return;
+        }
+        int hopByHopId = outgoingMessage.getHeader().getHopByHopId();
+
+        clientVerticle.sendWithResponseHandler(messageToSend, currentFlow.getKey(), hopByHopId, responseBuffer -> {
             // 1. Parse responseBuffer to DiameterMessage
             DiameterMessage responseMessage = parseBufferToDiameterMessage(responseBuffer);
             if (responseMessage == null) {
@@ -64,11 +73,22 @@ public class DiameterFlowExecutor {
                                + currentFlow.getKey()
                                + ", Command: "
                                + responseMessage.getHeader().getCommandCode()
+                               + ", HopByHop: " + responseMessage.getHeader().getHopByHopId() // Log HopByHop for verification
                                + ", E2E: "
                                + responseMessage.getHeader().getEndToEndId());
 
             Integer resultCode = responseMessage.<Integer>getAvpValue(RESULT_CODE);
             if (resultCode < 3000) {
+                // Before executing next step, ensure the HopByHopID of response matches request
+                // This is an additional check, main correlation is done by DiameterClientVerticle
+                if (responseMessage.getHeader().getHopByHopId() != hopByHopId) {
+                    Console.error("HopByHopID mismatch for flow " + currentFlow.getKey() +
+                                  ". Expected: " + hopByHopId +
+                                  ", Received: " + responseMessage.getHeader().getHopByHopId());
+                    // overallFlowPromise.tryFail("HopByHopID mismatch for flow " + currentFlow.getKey());
+                    // Decide if this should be a fatal flow error or just a warning.
+                    // For now, logging and continuing, as the client verticle should have routed it correctly.
+                }
                 executeNextStep(currentFlow, overallFlowPromise); // Recursive call to handle next step or complete
             } else {
                 String errorMsg = responseMessage.getAvpValue(ERROR_MESSAGE);
@@ -78,7 +98,7 @@ public class DiameterFlowExecutor {
         }).onFailure(err -> {
             Console.error("Failed to send message or handle response for flow "
                                + currentFlow.getKey()
-                               + ": "
+                               + " (HopByHopID: " + hopByHopId + "): "
                                + err.getMessage());
             overallFlowPromise.tryFail(err); // Use tryFail
         });
