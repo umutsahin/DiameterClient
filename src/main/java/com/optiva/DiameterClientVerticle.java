@@ -1,5 +1,6 @@
 package com.optiva;
 
+import com.optiva.OpenTelemetryConfig; // Add this
 import com.optiva.charging.openapi.diameter.DiameterMessage;
 import com.optiva.console.Console;
 import com.optiva.flows.DiameterFlow;
@@ -175,6 +176,8 @@ public class DiameterClientVerticle extends AbstractVerticle {
         selectedSocket.write(message, writeOp -> {
             if (writeOp.succeeded()) {
                 writePromise.complete();
+                // Increment messages.sent counter
+                OpenTelemetryConfig.getMessagesSentCounter().add(1); // Add this line
             } else {
                 Console.error("Failed to write message to socket "
                               + socketAddress(selectedSocket)

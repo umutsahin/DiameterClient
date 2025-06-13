@@ -1,6 +1,10 @@
 package com.optiva;
 
+import com.optiva.OpenTelemetryConfig;
 import com.optiva.console.Console;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.context.Scope;
 import com.optiva.flows.DiameterFlow;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
@@ -57,51 +61,128 @@ public class MessageScheduler {
     private void processQueue() {
         DiameterFlow flow;
         flow = getDiameterFlow();
-        Buffer messageToSend = flow.getNextMessage();
 
-        if (messageToSend == null) {
-            // Flow might have been completed by a previous operation or yielded no message initially.
-            Console.debug("MessageScheduler: Flow "
-                          + flow.getKey()
-                          + " yielded no message initially or is already complete. Completing it.");
-            completeFlow(flow); // Ensure activeFlows is decremented if it was incremented by scheduleFlow
-            return;
-        }
+        Span span = OpenTelemetryConfig.getTracer().spanBuilder("Process Message")
+                .setAttribute("flow.key", flow.getKey())
+                .startSpan();
 
-        clientVerticle.sendWithResponseHandler(messageToSend, flow.getKey(), responseMessage -> {
-            Console.debug("MessageScheduler: Received response for flow " + flow.getKey());
-            flow.processResponse(responseMessage); // Let the flow update its state based on the response
-            if (flow.isInProgress()) {
-                Console.debug("MessageScheduler: Flow " + flow.getKey() + " has next message. Re-scheduling.");
-                synchronized (messageQueue) {
-                    messageQueue.add(flow); // Re-queue the same flow for its next message
-                }
-            } else {
-                Console.debug("MessageScheduler: " + flow + " completed or has no further messages after response.");
+        // Make the span current for operations within this method
+        try (Scope scope = span.makeCurrent()) {
+            Buffer messageToSend = flow.getNextMessage();
+
+            if (messageToSend == null) {
+                Console.debug("MessageScheduler: Flow " + flow.getKey() + " yielded no message or is complete. Completing it.");
                 completeFlow(flow);
+                span.setStatus(StatusCode.OK, "Flow completed without sending message");
+                span.end(); // End span here
+                return;
             }
-        }).onFailure(err -> {
-            Console.error("MessageScheduler: Failed to send message for " + flow + ": " + err.getMessage());
-            flow.terminateFlow();
-            completeFlow(flow);
-        });
+            // Optionally: flow.getMessageType() or similar if you want to add it as an attribute
+            // span.setAttribute("message.type", flow.getMessageType());
+
+
+            long startTimeNanos = System.nanoTime();
+
+            clientVerticle.sendWithResponseHandler(messageToSend, flow.getKey(), responseMessage -> {
+                try (Scope s = span.makeCurrent()) { // Re-activate span in callback
+                    long durationNanos = System.nanoTime() - startTimeNanos;
+                    OpenTelemetryConfig.getMessageLatencyHistogram().record(durationNanos / 1_000_000.0);
+
+                    Console.debug("MessageScheduler: Received response for flow " + flow.getKey());
+                    flow.processResponse(responseMessage);
+                    if (flow.isInProgress()) {
+                        Console.debug("MessageScheduler: Flow " + flow.getKey() + " has next message. Re-scheduling.");
+                        synchronized (messageQueue) {
+                            messageQueue.add(flow);
+                        }
+                    } else {
+                        Console.debug("MessageScheduler: " + flow + " completed or has no further messages after response.");
+                        completeFlow(flow);
+                    }
+                    span.setStatus(StatusCode.OK);
+                } finally {
+                    span.end(); // End span in success callback
+                }
+            }).onFailure(err -> {
+                try (Scope s = span.makeCurrent()) { // Re-activate span in callback
+                    long durationNanos = System.nanoTime() - startTimeNanos;
+                    OpenTelemetryConfig.getMessageLatencyHistogram().record(durationNanos / 1_000_000.0);
+
+                    Console.error("MessageScheduler: Failed to send message for " + flow + ": " + err.getMessage());
+                    span.setStatus(StatusCode.ERROR, "Failed to send message: " + err.getMessage());
+                    span.recordException(err);
+                    flow.terminateFlow();
+                    completeFlow(flow);
+                } finally {
+                    span.end(); // End span in failure callback
+                }
+            });
+        } catch (Exception e) { // Catch synchronous exceptions
+            span.setStatus(StatusCode.ERROR, "Exception in processQueue: " + e.getMessage());
+            span.recordException(e);
+            span.end();
+            // Depending on desired behavior, you might want to rethrow or handle differently
+            // For now, just logging via span and ending it.
+             Console.error("Synchronous exception in processQueue for flow " + flow.getKey() + ": " + e.getMessage());
+        }
     }
 
     public void singleFlow(DiameterFlow flow) {
-        Buffer messageToSend = flow.getNextMessage();
-        clientVerticle.sendWithResponseHandler(messageToSend, flow.getKey(), responseMessage -> {
-            Console.debug("MessageScheduler: Received response for flow " + flow.getKey());
-            flow.processResponse(responseMessage); // Let the flow update its state based on the response
-            if (flow.isInProgress()) {
-                Console.debug("MessageScheduler: Flow " + flow.getKey() + " has next message. Re-scheduling.");
-                singleFlow(flow);
-            } else {
-                Console.debug("MessageScheduler: " + flow + " completed or has no further messages after response.");
+        Span span = OpenTelemetryConfig.getTracer().spanBuilder("Process Single Message")
+            .setAttribute("flow.key", flow.getKey())
+            .startSpan();
+
+        try (Scope scope = span.makeCurrent()) {
+            Buffer messageToSend = flow.getNextMessage();
+            if (messageToSend == null) {
+                Console.debug("MessageScheduler: singleFlow " + flow.getKey() + " yielded no message or is complete.");
+                span.setStatus(StatusCode.OK, "Flow completed without sending message");
+                span.end();
+                return;
             }
-        }).onComplete(e -> Console.log(flow + " completed...")).onFailure(err -> {
-            Console.error("MessageScheduler: Failed to send message for " + flow + ": " + err.getMessage());
-            flow.terminateFlow();
-        });
+            // Optionally: span.setAttribute("message.type", flow.getMessageType());
+
+
+            long startTimeNanos = System.nanoTime();
+
+            clientVerticle.sendWithResponseHandler(messageToSend, flow.getKey(), responseMessage -> {
+                try(Scope s = span.makeCurrent()) {
+                    long durationNanos = System.nanoTime() - startTimeNanos;
+                    OpenTelemetryConfig.getMessageLatencyHistogram().record(durationNanos / 1_000_000.0);
+
+                    Console.debug("MessageScheduler: Received response for flow " + flow.getKey());
+                    flow.processResponse(responseMessage);
+                    if (flow.isInProgress()) {
+                        Console.debug("MessageScheduler: Flow " + flow.getKey() + " has next message. Re-scheduling for singleFlow.");
+                        // Recursive call, new span will be created for the next message in singleFlow.
+                        // Current span for *this* message ends after this callback.
+                        singleFlow(flow);
+                    } else {
+                        Console.debug("MessageScheduler: " + flow + " completed (singleFlow).");
+                    }
+                    span.setStatus(StatusCode.OK);
+                } finally {
+                    span.end(); // End span for this message delivery
+                }
+            }).onFailure(err -> {
+                try (Scope s = span.makeCurrent()) {
+                    long durationNanos = System.nanoTime() - startTimeNanos;
+                    OpenTelemetryConfig.getMessageLatencyHistogram().record(durationNanos / 1_000_000.0);
+
+                    Console.error("MessageScheduler: Failed to send message for " + flow + " in singleFlow: " + err.getMessage());
+                    span.setStatus(StatusCode.ERROR, "Failed to send message in singleFlow: " + err.getMessage());
+                    span.recordException(err);
+                    flow.terminateFlow();
+                } finally {
+                    span.end(); // End span for this message delivery attempt
+                }
+            });
+        } catch (Exception e) { // Catch synchronous exceptions
+            span.setStatus(StatusCode.ERROR, "Exception in singleFlow: " + e.getMessage());
+            span.recordException(e);
+            span.end();
+            Console.error("Synchronous exception in singleFlow for flow " + flow.getKey() + ": " + e.getMessage());
+        }
     }
 
     private DiameterFlow getDiameterFlow() {

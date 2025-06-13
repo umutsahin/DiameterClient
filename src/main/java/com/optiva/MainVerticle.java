@@ -1,5 +1,8 @@
 package com.optiva;
 
+// Add this import at the top
+import com.optiva.OpenTelemetryConfig;
+
 import com.optiva.console.Console;
 import com.optiva.flows.DiameterFBC;
 import com.optiva.flows.DiameterFlow;

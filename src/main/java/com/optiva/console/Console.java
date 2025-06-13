@@ -1,5 +1,9 @@
 package com.optiva.console;
 
+import com.optiva.OpenTelemetryConfig; // Add this
+import io.opentelemetry.api.logs.Severity; // Add this
+import io.opentelemetry.api.trace.Span; // Add this
+import io.opentelemetry.context.Context; // Add this
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.jline.reader.impl.completer.StringsCompleter;
@@ -44,11 +48,23 @@ public class Console {
 
     public static void debug(String message) {
         if (LEVEL.get() > 0) {
+            // Original JLine logging
             AttributedString attrMessage = new AttributedStringBuilder().style(ITALIC_MAGENTA)
                     .append(message)
                     .style(AttributedStyle.DEFAULT)
                     .toAttributedString();
             READER.printAbove(attrMessage);
+
+            // OpenTelemetry Logging
+            io.opentelemetry.api.logs.Logger otelLogger = OpenTelemetryConfig.getOtelLogger();
+            if (otelLogger != null) {
+                otelLogger.logRecordBuilder()
+                    .setBody(message)
+                    .setSeverity(Severity.DEBUG)
+                    // Associate with current span if any
+                    .setContext(Context.current()) // This carries the current SpanContext
+                    .emit();
+            }
         }
     }
 
