@@ -29,6 +29,15 @@ public class Console {
     private static final AttributedStyle BOLD_YELLOW = AttributedStyle.BOLD.foreground(AttributedStyle.YELLOW);
     private static final AttributedStyle BOLD_RED = AttributedStyle.BOLD.foreground(AttributedStyle.RED);
 
+    private static final List<Command> COMMANDS = List.of(new Command("flow", List.of("[ps|ims]"), "flow type to run"),
+                                                          new Command("rating-group", List.of("[n]"), "rating group of messages to be sent, default 1"),
+                                                          new Command("message-count", List.of("[n]"), "message count within single session, default 4"),
+                                                          new Command("single", List.of(), "runs single session"),
+                                                          new Command("rps", List.of("[n]"), "request per second"),
+                                                          new Command("debug",
+                                                                      List.of("[0|1]"),
+                                                                      "enable/disable debug logs"),
+                                                          new Command("exit", List.of(), "graceful shutdown"));
     static {
         //configureLogging();
         Terminal terminal;
@@ -37,7 +46,7 @@ public class Console {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        StringsCompleter completer = new StringsCompleter("single", "rps", "debug", "exit");
+        StringsCompleter completer = new StringsCompleter(COMMANDS.stream().map(Command::command).toList());
         READER = LineReaderBuilder.builder().terminal(terminal).completer(completer).build();
     }
 
@@ -110,13 +119,6 @@ public class Console {
                  description);
         }
     }
-
-    private static final List<Command> COMMANDS = List.of(new Command("single", List.of(), "runs single session"),
-                                                          new Command("rps", List.of("[n]"), "request per second"),
-                                                          new Command("debug",
-                                                                      List.of("[0|1]"),
-                                                                      "enable/disable debug logs"),
-                                                          new Command("exit", List.of(), "graceful shutdown"));
 
     private static final String PROMPT_PREFIX = """
                                                 ================================================================================

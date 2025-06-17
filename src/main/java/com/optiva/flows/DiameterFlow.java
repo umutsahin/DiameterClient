@@ -14,17 +14,22 @@ import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTab
 
 public abstract class DiameterFlow {
     protected static final ThreadLocalRandom RANDOM = ThreadLocalRandom.current();
+    protected boolean error = false;
 
     public abstract Buffer getNextMessage();
 
-    public final void processResponse(DiameterMessage responseMessage) {
+    public void processResponse(DiameterMessage responseMessage) {
         Integer resultCode = responseMessage.getAvpValue(RESULT_CODE);
         boolean isSuccess = resultCode != null && (resultCode >= 2000 && resultCode < 3000);
 
         if (!isSuccess) {
             String errorMsg = responseMessage.getAvpValue(ERROR_MESSAGE);
             Console.error(this + " failed. Result-Code: " + resultCode + ". Message: " + errorMsg);
-            terminateFlow();
+            if (error) {
+                iterateFlow();
+            } else {
+                terminateFlow();
+            }
             return;
         }
         iterateFlow();

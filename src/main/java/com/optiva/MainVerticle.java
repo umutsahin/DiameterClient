@@ -1,22 +1,15 @@
 package com.optiva;
 
-// Add this import at the top
-import com.optiva.OpenTelemetryConfig;
-
 import com.optiva.console.Console;
-import com.optiva.flows.DiameterFBC;
-import com.optiva.flows.DiameterFlow;
-import io.opentelemetry.api.logs.Logger;
+import com.optiva.flows.DiameterChargingFlow;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 
-import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
 
 public class MainVerticle extends AbstractVerticle {
     private int currentTps = 0;
@@ -26,20 +19,11 @@ public class MainVerticle extends AbstractVerticle {
 
     private DiameterClientVerticle clientVerticle;
     private MessageScheduler messageScheduler;
-    private final Random random = new Random(); // For generating flow parameters
 
     // Configuration for DiameterClientVerticle
     private String diameterServerHost = "127.0.0.1";
     private int diameterServerPort = 3868;
     private int diameterSocketCount = 1; // Example: default to 1 socket
-
-    // Configuration for DiameterFBC flow instances
-    private int fbcMessageCount = 4; // Example: 3 messages per FBC flow (CCR-I, CCR-U, CCR-T)
-    private int fbcRatingGroup = 16;
-    private final Supplier<DiameterFlow> flowGenerator = () -> {
-        String msisdn = "447400000" + String.format("%04d", random.nextInt(1000));
-        return new DiameterFBC(msisdn, fbcRatingGroup, fbcMessageCount);
-    };
 
     @Override
     public void start(Promise<Void> startPromise) {
@@ -47,8 +31,6 @@ public class MainVerticle extends AbstractVerticle {
         this.diameterServerHost = config().getString("diameter.server.host", "127.0.0.1");
         this.diameterServerPort = config().getInteger("diameter.server.port", 3868);
         this.diameterSocketCount = config().getInteger("diameter.socket.count", 1);
-        this.fbcMessageCount = config().getInteger("fbc.message.count", 4);
-        this.fbcRatingGroup = config().getInteger("fbc.rating.group", 16);
 
         clientVerticle = new DiameterClientVerticle();
         DeploymentOptions clientOptions = new DeploymentOptions().setConfig(new JsonObject().put("serverHost",
@@ -61,7 +43,9 @@ public class MainVerticle extends AbstractVerticle {
         vertx.deployVerticle(clientVerticle, clientOptions, deployRes -> {
             if (deployRes.succeeded()) {
                 Console.log("DiameterClientVerticle deployed successfully with ID: " + deployRes.result());
-                this.messageScheduler = new MessageScheduler(vertx, clientVerticle, activeFlows, flowGenerator);
+                this.messageScheduler = new MessageScheduler(vertx,
+                                                             clientVerticle,
+                                                             activeFlows);
                 Console.log("MessageScheduler initialized.");
                 new Thread(this::handleStdIn, "Console-Thread").start();
                 startPromise.complete();
@@ -88,15 +72,58 @@ public class MainVerticle extends AbstractVerticle {
             }
 
             switch (parts[0].toLowerCase()) {
-                case "single" -> messageScheduler.singleFlow(flowGenerator.get());
+                case "flow" -> {
+                    if (DiameterChargingFlow.validate(parts[1])) {
+                        Console.warn("Now simulator will use " + parts[1] + " flow");
+                        messageScheduler.flow(parts[1]);
+                    } else {
+                        Console.error("No such flow: " + parts[1]);
+                    }
+                }
+                case "rating-group" -> {
+                    try {
+                        int rg = Integer.parseInt(parts[1]);
+                        if (rg > 0) {
+                            messageScheduler.setRatingGroup(rg);
+                        } else {
+                            Console.warn("Rating group value must be non-negative.");
+                        }
+                    } catch (NumberFormatException e) {
+                        Console.warn("Invalid rating group value: " + parts[1]);
+                    }
+                }
+                case "message-count" -> {
+                    try {
+                        int mc = Integer.parseInt(parts[1]);
+                        if (mc > 2) {
+                            messageScheduler.setMessageCount(mc);
+                        } else {
+                            Console.warn("Message count value must be bigger than 2.");
+                        }
+                    } catch (NumberFormatException e) {
+                        Console.warn("Invalid message count value: " + parts[1]);
+                    }
+                }
+                case "single" -> {
+                    if (messageScheduler.isNotFlowSet()) {
+                        Console.error("You must set a flow first");
+                        continue;
+                    }
+                    Console.log("Starting single flow...");
+                    messageScheduler.singleFlow();
+                }
                 case "rps" -> {
                     if (shuttingDown.get()) {
                         Console.log("Shutdown in progress. Cannot change RPS.");
-                        return;
+                        continue;
                     }
                     if (parts.length != 2) {
                         Console.error("rps command requires 2 arguments");
-                        return;
+                        continue;
+                    }
+                    if (messageScheduler.isNotFlowSet()) {
+                        Console.error("You must set a flow first");
+                        continue;
                     }
                     try {
                         int newTps = Integer.parseInt(parts[1]);
@@ -112,7 +139,7 @@ public class MainVerticle extends AbstractVerticle {
                 case "debug" -> {
                     if (parts.length != 2) {
                         Console.error("debug command requires 2 arguments");
-                        return;
+                        continue;
                     }
                     try {
                         int level = Integer.parseInt(parts[1]);
@@ -140,10 +167,6 @@ public class MainVerticle extends AbstractVerticle {
         if (timerId != -1) {
             vertx.cancelTimer(timerId);
             timerId = -1;
-        }
-        if (this.messageScheduler == null) {
-            Console.error("MessageScheduler not initialized. Cannot adjust RPS.");
-            return;
         }
 
         this.messageScheduler.setRps(newTps);

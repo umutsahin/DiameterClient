@@ -2,6 +2,8 @@ package com.optiva;
 
 import com.optiva.console.Console;
 import com.optiva.flows.DiameterFlow;
+import com.optiva.flows.DiameterIMS;
+import com.optiva.flows.DiameterPS;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.context.Scope;
@@ -10,7 +12,9 @@ import io.vertx.core.buffer.Buffer;
 
 import java.util.LinkedList;
 import java.util.Queue;
+import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static com.optiva.OpenTelemetryConfig.messageLatencyHistogram;
@@ -23,15 +27,23 @@ public class MessageScheduler {
     private long timerId = -1;
     private final AtomicInteger activeFlowsCounter; // To be passed from MainVerticle
     private final Supplier<DiameterFlow> flowGenerator;
+    private final Random random = new Random(); // For generating flow parameters
+    private final AtomicReference<String> chargingFlowName = new AtomicReference<>("ims");
+    private final AtomicInteger ratingGroup = new AtomicInteger(10);
+    private final AtomicInteger messageCount = new AtomicInteger(4);
 
-    public MessageScheduler(Vertx vertx,
-                            DiameterClientVerticle clientVerticle,
-                            AtomicInteger activeFlowsCounter,
-                            Supplier<DiameterFlow> flowGenerator) {
+    public MessageScheduler(Vertx vertx, DiameterClientVerticle clientVerticle, AtomicInteger activeFlowsCounter) {
         this.vertx = vertx;
         this.clientVerticle = clientVerticle;
         this.activeFlowsCounter = activeFlowsCounter;
-        this.flowGenerator = flowGenerator;
+        this.flowGenerator = () -> {
+            String msisdn = "447400000" + String.format("%04d", random.nextInt(1000));
+            return switch (chargingFlowName.get()) {
+                case "ims" -> new DiameterIMS(msisdn, ratingGroup.get(), messageCount.get());
+                case "ps" -> new DiameterPS(msisdn, ratingGroup.get(), messageCount.get());
+                default -> throw new IllegalStateException("Unexpected value: " + chargingFlowName.get());
+            };
+        };
     }
 
     public void setRps(int rps) {
@@ -61,8 +73,7 @@ public class MessageScheduler {
     }
 
     private void processQueue() {
-        DiameterFlow flow;
-        flow = getDiameterFlow();
+        DiameterFlow flow = getDiameterFlow();
 
         Span span = createSpan(flow, "Process Message");
 
@@ -118,7 +129,11 @@ public class MessageScheduler {
         }
     }
 
-    public void singleFlow(DiameterFlow flow) {
+    public void singleFlow() {
+        singleFlow(flowGenerator.get());
+    }
+
+    private void singleFlow(DiameterFlow flow) {
         Span span = createSpan(flow, "Process Single Message");
 
         try (Scope ignored = span.makeCurrent()) {
@@ -142,14 +157,10 @@ public class MessageScheduler {
                 }
                 flow.processResponse(responseMessage);
                 if (flow.isInProgress()) {
-                    Console.debug("MessageScheduler: Flow "
-                                  + flow.getKey()
-                                  + " has next message. Re-scheduling for singleFlow.");
-                    // Recursive call, new span will be created for the next message in singleFlow.
-                    // Current span for *this* message ends after this callback.
+                    Console.log("MessageScheduler: " + flow + " has next message.");
                     singleFlow(flow);
                 } else {
-                    Console.debug("MessageScheduler: " + flow + " completed (singleFlow).");
+                    Console.log("MessageScheduler: " + flow + " completed (singleFlow).");
                 }
             }).onFailure(err -> {
                 try (Scope ignored1 = span.makeCurrent()) {
@@ -199,5 +210,21 @@ public class MessageScheduler {
     private void completeFlow(DiameterFlow flow) {
         int remainingActive = activeFlowsCounter.decrementAndGet();
         Console.debug("MessageScheduler: Flow " + flow.getKey() + " marked complete. Active flows: " + remainingActive);
+    }
+
+    public void flow(String flowName) {
+        chargingFlowName.set(flowName);
+    }
+
+    public boolean isNotFlowSet() {
+        return chargingFlowName.get() == null;
+    }
+
+    public void setRatingGroup(int rg) {
+        ratingGroup.set(rg);
+    }
+
+    public void setMessageCount(int mc) {
+        messageCount.set(mc);
     }
 }
