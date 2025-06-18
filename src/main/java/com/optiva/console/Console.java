@@ -5,6 +5,8 @@ import io.opentelemetry.api.logs.Severity;
 import io.opentelemetry.context.Context;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
+import org.jline.reader.impl.completer.AggregateCompleter;
+import org.jline.reader.impl.completer.ArgumentCompleter;
 import org.jline.reader.impl.completer.StringsCompleter;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
@@ -26,18 +28,26 @@ public class Console {
     private static final LineReader READER;
     private static final AttributedStyle ITALIC_MAGENTA = AttributedStyle.DEFAULT.italic()
             .foreground(AttributedStyle.MAGENTA);
+    private static final AttributedStyle ITALIC_CYAN = AttributedStyle.DEFAULT.italic()
+            .foreground(AttributedStyle.CYAN);
     private static final AttributedStyle BOLD_YELLOW = AttributedStyle.BOLD.foreground(AttributedStyle.YELLOW);
     private static final AttributedStyle BOLD_RED = AttributedStyle.BOLD.foreground(AttributedStyle.RED);
-
-    private static final List<Command> COMMANDS = List.of(new Command("flow", List.of("[ps|ims]"), "flow type to run"),
-                                                          new Command("rating-group", List.of("[n]"), "rating group of messages to be sent, default 1"),
-                                                          new Command("message-count", List.of("[n]"), "message count within single session, default 4"),
+    private static final String NUMERIC = "[n]";
+    private static final List<Command> COMMANDS = List.of(new Command("flow",
+                                                                      List.of("ps", "ims-moc", "ims-mtc"),
+                                                                      "flow type to run, default ims-moc"),
+                                                          new Command("rating-group",
+                                                                      List.of(NUMERIC),
+                                                                      "rating group of messages to be sent, default 10"),
+                                                          new Command("message-count",
+                                                                      List.of(NUMERIC),
+                                                                      "message count within single session, default 4"),
                                                           new Command("single", List.of(), "runs single session"),
-                                                          new Command("rps", List.of("[n]"), "request per second"),
-                                                          new Command("debug",
-                                                                      List.of("[0|1]"),
+                                                          new Command("rps", List.of(NUMERIC), "request per second"),
+                                                          new Command("log-level", List.of("0", "1", "2"),
                                                                       "enable/disable debug logs"),
                                                           new Command("exit", List.of(), "graceful shutdown"));
+
     static {
         //configureLogging();
         Terminal terminal;
@@ -46,7 +56,16 @@ public class Console {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        StringsCompleter completer = new StringsCompleter(COMMANDS.stream().map(Command::command).toList());
+
+        AggregateCompleter completer = new AggregateCompleter(COMMANDS.stream().map(c -> {
+            if (c.parameters().isEmpty()) {
+                return new StringsCompleter(c.command());
+            } else if (c.parameters.size() == 1 && NUMERIC.equals(c.parameters().getFirst())) {
+                return new StringsCompleter(c.command());
+            } else {
+                return new ArgumentCompleter(new StringsCompleter(c.command()), new StringsCompleter(c.parameters()));
+            }
+        }).toList());
         READER = LineReaderBuilder.builder().terminal(terminal).completer(completer).build();
     }
 
@@ -61,9 +80,24 @@ public class Console {
                 .setSeverity(Severity.DEBUG)
                 .setContext(Context.current())
                 .emit();
-        if (LEVEL.get() > 0) {
-            // Original JLine logging
+        if (LEVEL.get() == 1) {
             AttributedString attrMessage = new AttributedStringBuilder().style(ITALIC_MAGENTA)
+                    .append(message)
+                    .style(AttributedStyle.DEFAULT)
+                    .toAttributedString();
+            READER.printAbove(attrMessage);
+        }
+    }
+
+    public static void trace(String message) {
+        OpenTelemetryConfig.otelLogger.logRecordBuilder()
+                .setTimestamp(Instant.now())
+                .setBody(message)
+                .setSeverity(Severity.TRACE)
+                .setContext(Context.current())
+                .emit();
+        if (LEVEL.get() == 2) {
+            AttributedString attrMessage = new AttributedStringBuilder().style(ITALIC_CYAN)
                     .append(message)
                     .style(AttributedStyle.DEFAULT)
                     .toAttributedString();
@@ -115,8 +149,15 @@ public class Console {
                  parameters,
                  parameters.isEmpty()
                  ? command
-                 : command + " " + String.join(" ", parameters),
+                 : command + " " + calculateParameters(parameters),
                  description);
+        }
+
+        private static String calculateParameters(List<String> parameters) {
+            if (parameters.size() == 1 && NUMERIC.equals(parameters.getFirst())) {
+                return NUMERIC;
+            }
+            return "[" + String.join("|", parameters) + "]";
         }
     }
 

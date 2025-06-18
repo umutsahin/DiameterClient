@@ -3,6 +3,7 @@ package com.optiva;
 import com.optiva.charging.openapi.diameter.DiameterMessage;
 import com.optiva.console.Console;
 import com.optiva.flows.DiameterFlow;
+import io.netty.buffer.ByteBuf;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
@@ -42,10 +43,13 @@ public class DiameterClientVerticle extends AbstractVerticle {
         this.serverPort = config().getInteger("serverPort", 3868);
         int socketCount = config().getInteger("socketCount", 1);
 
-        NetClientOptions options = new NetClientOptions().setConnectTimeout(10000).setReconnectAttempts(0);
+        NetClientOptions options = new NetClientOptions().setConnectTimeout(10000)
+                .setReconnectAttempts(0)
+                .setReceiveBufferSize(8196)
+                .setSendBufferSize(8196);
         this.client = vertx.createNetClient(options);
 
-        Console.debug("DiameterClientVerticle starting. Connecting to "
+        Console.trace("DiameterClientVerticle starting. Connecting to "
                       + serverHost
                       + ":"
                       + serverPort
@@ -54,7 +58,7 @@ public class DiameterClientVerticle extends AbstractVerticle {
                       + " sockets.");
 
         if (socketCount == 0) {
-            Console.debug("Socket count is 0. DiameterClientVerticle started without connections.");
+            Console.trace("Socket count is 0. DiameterClientVerticle started without connections.");
             this.startPromiseInternal.complete();
             return;
         }
@@ -69,31 +73,23 @@ public class DiameterClientVerticle extends AbstractVerticle {
             if (res.succeeded()) {
                 NetSocket socket = res.result();
                 sockets.add(socket);
-                Console.debug("Successfully connected socket: "
+                Console.trace("Successfully connected socket: "
                               + socketAddress(socket)
                               + ". Total sockets: "
                               + sockets.size());
-
-                // Default handler - will be overridden by sendWithResponseHandler
                 socket.handler(buffer -> {
-                    DiameterMessage responseMessage = parseBufferToDiameterMessage(buffer);
-                    if (responseMessage == null) {
-                        Console.error("Received data from "
-                                      + socketAddress(socket)
-                                      + " but failed to parse DiameterMessage: "
-                                      + buffer.length()
-                                      + " bytes");
-                        return;
-                    }
                     Map<String, Handler<DiameterMessage>> socketSpecificHandlers = responseHandlers.get(socket);
-                    String flowKey = DiameterFlow.getKey(responseMessage);
-                    if (socketSpecificHandlers != null) {
-                        Handler<DiameterMessage> specificHandler
-                                = socketSpecificHandlers.remove(flowKey); // Remove after retrieving
-                        if (specificHandler != null) {
-                            specificHandler.handle(responseMessage);
+                    ByteBuf byteBuf = ((BufferImpl) buffer).byteBuf();
+                    int wi = byteBuf.writerIndex();
+                    do {
+                        byteBuf.writerIndex(wi);
+                        DiameterMessage responseMessage = new DiameterMessage(byteBuf);
+                        String flowKey = DiameterFlow.getKey(responseMessage);
+                        Handler<DiameterMessage> handler = socketSpecificHandlers.remove(flowKey);
+                        if (handler != null) {
+                            handler.handle(responseMessage);
                         } else {
-                            Console.debug("Received data from "
+                            Console.trace("Received data from "
                                           + socketAddress(socket)
                                           + " with FlowKey "
                                           + flowKey
@@ -101,19 +97,13 @@ public class DiameterClientVerticle extends AbstractVerticle {
                         }
                         if (socketSpecificHandlers.isEmpty()) {
                             responseHandlers.remove(socket); // Clean up outer map if inner map is empty
-                            Console.debug("Cleaned up empty handler map for socket " + socketAddress(socket));
+                            Console.trace("Cleaned up empty handler map for socket " + socketAddress(socket));
                         }
-                    } else {
-                        Console.debug("Received data from "
-                                      + socketAddress(socket)
-                                      + " with FlowKey "
-                                      + flowKey
-                                      + " but no handlers registered for this socket.");
-                    }
+                    } while (wi != byteBuf.writerIndex());
                 });
 
                 socket.closeHandler(v -> {
-                    Console.debug("Socket closed: " + socketAddress(socket));
+                    Console.trace("Socket closed: " + socketAddress(socket));
                     cleanup(socket);
                 });
 
@@ -220,18 +210,18 @@ public class DiameterClientVerticle extends AbstractVerticle {
                 Console.error("getSocket called with null flowKey and no sockets available.");
                 return null;
             }
-            Console.debug("getSocket called with null flowKey, using round-robin for socket selection.");
+            Console.trace("getSocket called with null flowKey, using round-robin for socket selection.");
             return sockets.get(roundRobinCounter.getAndIncrement() % sockets.size());
         }
 
         NetSocket existingSocket = flowToSocketMap.get(flowKey);
 
         if (existingSocket != null && sockets.contains(existingSocket)) {
-            Console.debug("Reusing existing socket " + socketAddress(existingSocket) + " for flowKey: " + flowKey);
+            Console.trace("Reusing existing socket " + socketAddress(existingSocket) + " for flowKey: " + flowKey);
             return existingSocket;
         } else {
             if (existingSocket != null) {
-                Console.debug("Cleaning up stale socket " + socketAddress(existingSocket) + " for flowKey: " + flowKey);
+                Console.trace("Cleaning up stale socket " + socketAddress(existingSocket) + " for flowKey: " + flowKey);
                 flowToSocketMap.remove(flowKey, existingSocket);
             }
 
@@ -241,7 +231,7 @@ public class DiameterClientVerticle extends AbstractVerticle {
             }
 
             NetSocket selectedSocket = sockets.get(roundRobinCounter.getAndIncrement() % sockets.size());
-            Console.debug("Assigning new socket " + socketAddress(selectedSocket) + " for flowKey: " + flowKey);
+            Console.trace("Assigning new socket " + socketAddress(selectedSocket) + " for flowKey: " + flowKey);
             flowToSocketMap.put(flowKey, selectedSocket);
             return selectedSocket;
         }
@@ -253,7 +243,7 @@ public class DiameterClientVerticle extends AbstractVerticle {
 
     @Override
     public void stop(Promise<Void> stopPromise) {
-        Console.debug("DiameterClientVerticle stopping. Closing " + sockets.size() + " sockets.");
+        Console.trace("DiameterClientVerticle stopping. Closing " + sockets.size() + " sockets.");
         responseHandlers.clear();
         flowToSocketMap.clear();
         List<Future<Void>> closeFutures = sockets.stream().map(s -> {
@@ -267,7 +257,7 @@ public class DiameterClientVerticle extends AbstractVerticle {
             if (client != null) {
                 client.close(clientCloseRes -> {
                     if (clientCloseRes.succeeded()) {
-                        Console.debug("NetClient closed successfully.");
+                        Console.trace("NetClient closed successfully.");
                     } else {
                         Console.error("NetClient close failed: " + clientCloseRes.cause());
                     }

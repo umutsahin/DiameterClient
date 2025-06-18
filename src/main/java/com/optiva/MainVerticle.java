@@ -136,7 +136,7 @@ public class MainVerticle extends AbstractVerticle {
                         Console.warn("Invalid RPS value: " + parts[1]);
                     }
                 }
-                case "debug" -> {
+                case "log-level" -> {
                     if (parts.length != 2) {
                         Console.error("debug command requires 2 arguments");
                         continue;
@@ -163,33 +163,7 @@ public class MainVerticle extends AbstractVerticle {
             Console.log("RPS did not change. Active flows: " + activeFlows.get());
             return;
         }
-        Console.log("Adjusting RPS from " + currentTps + " to " + newTps + ". Active flows: " + activeFlows.get());
-        if (timerId != -1) {
-            vertx.cancelTimer(timerId);
-            timerId = -1;
-        }
-
         this.messageScheduler.setRps(newTps);
-        if (newTps > 0 && !shuttingDown.get()) {
-            Console.log("Populating MessageScheduler with up to "
-                        + newTps
-                        + " new flows. Target message RPS: "
-                        + newTps);
-            for (int i = currentTps; i < newTps; i++) {
-                if (shuttingDown.get()) {
-                    Console.log("Shutdown initiated, stopping flow population.");
-                    break;
-                }
-                this.messageScheduler.scheduleFlow();
-            }
-            Console.log("Finished populating MessageScheduler. It will manage "
-                        + activeFlows.get()
-                        + " active flows to achieve target message RPS.");
-
-        } else if (newTps == 0) {
-            Console.debug("RPS set to 0. MessageScheduler will stop dispatching messages. Active flows: "
-                          + activeFlows.get());
-        }
         this.currentTps = newTps;
     }
 
@@ -200,9 +174,7 @@ public class MainVerticle extends AbstractVerticle {
         }
 
         Console.log("Shutdown command received. Initiating graceful shutdown...");
-        if (timerId != -1) {
-            vertx.cancelTimer(timerId);
-        }
+        messageScheduler.setRps(0);
         Console.log("Stopped generating new flows. Waiting for " + activeFlows.get() + " active flows to complete...");
 
         long checkInterval = 1000;
@@ -210,9 +182,9 @@ public class MainVerticle extends AbstractVerticle {
             int currentActive = activeFlows.get();
             if (currentActive == 0) {
                 vertx.cancelTimer(checkId);
-                Console.log("All active flows completed.");
-                // Close DiameterClientVerticle first, then the main Vert.x instance
-                // clientVerticle instance here is the one we created, deployRes.result() is its deployment ID
+                if (timerId != -1) {
+                    vertx.cancelTimer(timerId);
+                }
                 String deploymentId = clientVerticle.deploymentID();
                 if (deploymentId != null) {
                     vertx.undeploy(deploymentId, undeployRes -> {

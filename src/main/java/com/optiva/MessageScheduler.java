@@ -1,9 +1,8 @@
 package com.optiva;
 
 import com.optiva.console.Console;
+import com.optiva.flows.DiameterChargingFlow;
 import com.optiva.flows.DiameterFlow;
-import com.optiva.flows.DiameterIMS;
-import com.optiva.flows.DiameterPS;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.context.Scope;
@@ -13,6 +12,7 @@ import io.vertx.core.buffer.Buffer;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -25,55 +25,62 @@ public class MessageScheduler {
     private final DiameterClientVerticle clientVerticle;
     private final Queue<DiameterFlow> messageQueue = new LinkedList<>();
     private long timerId = -1;
-    private final AtomicInteger activeFlowsCounter; // To be passed from MainVerticle
+    private final AtomicInteger activeFlows; // To be passed from MainVerticle
     private final Supplier<DiameterFlow> flowGenerator;
     private final Random random = new Random(); // For generating flow parameters
-    private final AtomicReference<String> chargingFlowName = new AtomicReference<>("ims");
+    private final AtomicReference<String> chargingFlowName = new AtomicReference<>("ims-moc");
     private final AtomicInteger ratingGroup = new AtomicInteger(10);
     private final AtomicInteger messageCount = new AtomicInteger(4);
+    private final AtomicBoolean running = new AtomicBoolean(false);
 
-    public MessageScheduler(Vertx vertx, DiameterClientVerticle clientVerticle, AtomicInteger activeFlowsCounter) {
+    public MessageScheduler(Vertx vertx, DiameterClientVerticle clientVerticle, AtomicInteger activeFlows) {
         this.vertx = vertx;
         this.clientVerticle = clientVerticle;
-        this.activeFlowsCounter = activeFlowsCounter;
+        this.activeFlows = activeFlows;
         this.flowGenerator = () -> {
             String msisdn = "447400000" + String.format("%04d", random.nextInt(1000));
-            return switch (chargingFlowName.get()) {
-                case "ims" -> new DiameterIMS(msisdn, ratingGroup.get(), messageCount.get());
-                case "ps" -> new DiameterPS(msisdn, ratingGroup.get(), messageCount.get());
-                default -> throw new IllegalStateException("Unexpected value: " + chargingFlowName.get());
-            };
+            return DiameterChargingFlow.newInstance(chargingFlowName.get(),
+                                                    msisdn,
+                                                    ratingGroup.get(),
+                                                    messageCount.get());
         };
     }
 
     public void setRps(int rps) {
         Console.log("MessageScheduler: Setting RPS to " + rps);
-        if (timerId != -1) {
-            vertx.cancelTimer(timerId);
-            timerId = -1;
-        }
-
         if (rps > 0) {
+            if (timerId != -1) {
+                vertx.cancelTimer(timerId);
+                timerId = -1;
+            }
+            running.set(true);
             long interval = Math.max(1, 1000 / rps);
             timerId = vertx.setPeriodic(interval, id -> processQueue());
             Console.log("MessageScheduler: Timer started with interval " + interval + "ms for RPS " + rps);
         } else {
+            running.set(false);
+            vertx.setPeriodic(1000, checkId -> {
+                int currentActive = activeFlows.get();
+                if (currentActive == 0) {
+                    vertx.cancelTimer(checkId);
+                    if (timerId != -1) {
+                        vertx.cancelTimer(timerId);
+                        timerId = -1;
+                    }
+                    Console.log("All active flows completed.");
+                } else {
+                    Console.log("Waiting for " + currentActive + " active flows to complete...");
+                }
+            });
             Console.log("MessageScheduler: RPS set to 0, timer stopped.");
-        }
-    }
-
-    public void scheduleFlow() {
-        activeFlowsCounter.incrementAndGet();
-        DiameterFlow flow = flowGenerator.get();
-
-        Console.log("MessageScheduler: Scheduling " + flow + ". Active flows: " + activeFlowsCounter.get());
-        synchronized (messageQueue) {
-            messageQueue.add(flow);
         }
     }
 
     private void processQueue() {
         DiameterFlow flow = getDiameterFlow();
+        if (flow == null) {
+            return;
+        }
 
         Span span = createSpan(flow, "Process Message");
 
@@ -81,7 +88,7 @@ public class MessageScheduler {
             Buffer messageToSend = flow.getNextMessage();
 
             if (messageToSend == null) {
-                Console.debug("MessageScheduler: Flow "
+                Console.error("MessageScheduler: Flow "
                               + flow.getKey()
                               + " yielded no message or is complete. Completing it.");
                 completeFlow(flow);
@@ -99,14 +106,14 @@ public class MessageScheduler {
                     Console.debug("MessageScheduler: Received response for flow " + flow.getKey());
                     flow.processResponse(responseMessage);
                     if (flow.isInProgress()) {
-                        Console.debug("MessageScheduler: Flow " + flow.getKey() + " has next message. Re-scheduling.");
+                        Console.warn("MessageScheduler: Flow " + flow.getKey() + " has next message. Re-scheduling.");
                         synchronized (messageQueue) {
                             messageQueue.add(flow);
                         }
                     } else {
-                        Console.debug("MessageScheduler: "
-                                      + flow
-                                      + " completed or has no further messages after response.");
+                        Console.warn("MessageScheduler: "
+                                     + flow
+                                     + " completed or has no further messages after response.");
                         completeFlow(flow);
                     }
                 } finally {
@@ -126,6 +133,7 @@ public class MessageScheduler {
         } catch (Exception e) {
             closeSpan(span, StatusCode.ERROR, "Exception in processQueue: " + e.getMessage(), e);
             Console.error("Synchronous exception in processQueue for flow " + flow.getKey() + ": " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
@@ -160,7 +168,7 @@ public class MessageScheduler {
                     Console.log("MessageScheduler: " + flow + " has next message.");
                     singleFlow(flow);
                 } else {
-                    Console.log("MessageScheduler: " + flow + " completed (singleFlow).");
+                    Console.log("MessageScheduler: " + flow + " completed.");
                 }
             }).onFailure(err -> {
                 try (Scope ignored1 = span.makeCurrent()) {
@@ -200,16 +208,17 @@ public class MessageScheduler {
             flow = messageQueue.poll();
         }
 
-        if (flow == null) {
-            activeFlowsCounter.incrementAndGet();
+        if (flow == null && running.get()) {
+            int i = activeFlows.incrementAndGet();
             flow = flowGenerator.get();
+            Console.warn("Starting new flow: " + flow + ", active flows: " + i);
         }
         return flow;
     }
 
     private void completeFlow(DiameterFlow flow) {
-        int remainingActive = activeFlowsCounter.decrementAndGet();
-        Console.debug("MessageScheduler: Flow " + flow.getKey() + " marked complete. Active flows: " + remainingActive);
+        int remainingActive = activeFlows.decrementAndGet();
+        Console.warn("MessageScheduler: Flow " + flow.getKey() + " marked complete. Active flows: " + remainingActive);
     }
 
     public void flow(String flowName) {
