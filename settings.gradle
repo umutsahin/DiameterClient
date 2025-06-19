@@ -11,5 +11,5 @@ dependencyResolutionManagement {
         }
     }
 }
-rootProject.name = 'diameter-test'
+rootProject.name = 'diameter-load-simulator'
 include 'diameter'

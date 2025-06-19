@@ -1,22 +1,22 @@
 package com.optiva.flows;
 
-import com.optiva.charging.openapi.diameter.DiameterCommandCode;
 import com.optiva.charging.openapi.diameter.DiameterMessage;
 import com.optiva.charging.openapi.diameter.DiameterMessageHeader;
 import com.optiva.charging.openapi.diameter.avp.Avp;
+import com.optiva.charging.openapi.diameter.common.enumeration.CommandCode;
+import io.vertx.core.buffer.Buffer;
 
 import java.net.Inet4Address;
 import java.net.UnknownHostException;
-import java.nio.ByteBuffer;
 import java.util.List;
 
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.HOST_IP_ADDRESS;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.ORIGIN_HOST;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.ORIGIN_REALM;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.PRODUCT_NAME;
-import static com.optiva.charging.openapi.diameter.avp.AvpCodeTable.RFC.VENDOR_ID;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.HOST_IP_ADDRESS;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.ORIGIN_HOST;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.ORIGIN_REALM;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.PRODUCT_NAME;
+import static com.optiva.charging.openapi.diameter.common.enumeration.AvpCodeTable.RFC.VENDOR_ID;
 
-public class DiameterCE implements DiameterFlow {
+public class DiameterCE extends DiameterFlow {
     private static final List<Avp> AVPS;
 
     static {
@@ -32,16 +32,28 @@ public class DiameterCE implements DiameterFlow {
     }
 
     @Override
-    public ByteBuffer getNextMessage() {
-        DiameterMessageHeader header = new DiameterMessageHeader.Builder(DiameterCommandCode.CE).setApplicationId(0)
+    public Buffer getNextMessage() { // Changed return type
+        DiameterMessageHeader header = new DiameterMessageHeader.Builder(CommandCode.CE).setApplicationId(0)
                 .setRequest()
                 .setHopByHopId(RANDOM.nextLong())
                 .setEndToEndId(RANDOM.nextLong())
                 .build();
 
-        ByteBuffer buffer = BUFFER.get();
-        new DiameterMessage(header, AVPS).convertToByteBuffer(buffer);
-        return buffer;
+        return writeMessageToBuffer(new DiameterMessage(header, AVPS));
+    }
+
+    @Override
+    public boolean isInProgress() {
+        return true;
+    }
+
+    @Override
+    public void iterateFlow() {
+
+    }
+
+    @Override
+    public void terminateFlow() {
     }
 
     @Override
@@ -49,8 +61,4 @@ public class DiameterCE implements DiameterFlow {
         return "";
     }
 
-    @Override
-    public DiameterFlow restart() {
-        return new DiameterCE();
-    }
 }

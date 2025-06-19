@@ -1,0 +1,12 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 3868
+  },
+  "load": {
+    "rps-per-scheduler": 200,
+    "flow-name": "ims-moc",
+    "rating-group": 10,
+    "message-count": 4
+  }
+}

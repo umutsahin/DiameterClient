@@ -43,7 +43,11 @@ public class DiameterUtil {
     }
 
     public static boolean isMultiService(DiameterMessage message) {
-        return message.<Integer>getAvpValue(MULTIPLE_SERVICES_INDICATOR, 0).equals(1);
+        if (message.getHeader().isRequest()) {
+            return message.<Integer>getAvpValue(MULTIPLE_SERVICES_INDICATOR, 0).equals(1);
+        } else {
+            return message.isAvpPresent(MULTIPLE_SERVICES_CREDIT_CONTROL);
+        }
     }
 
     public static Avp getServiceAvp(DiameterMessage message, AvpCode... avpCodes) {

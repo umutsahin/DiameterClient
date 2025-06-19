@@ -75,7 +75,7 @@ public final class AvpCodeTable {
         AvpCode CC_REQUEST_NUMBER = new AvpCode("CC_REQUEST_NUMBER", 415, VendorId.RFC, UNSIGNED_32);
         AvpCode CC_REQUEST_TYPE = new AvpCode("CC_REQUEST_TYPE", 416, VendorId.RFC, ENUMERATED);
         AvpCode CC_SERVICE_SPECIFIC_UNITS = new AvpCode("CC_SERVICE_SPECIFIC_UNITS", 417, VendorId.RFC, UNSIGNED_64);
-        AvpCode CC_TIME = new AvpCode("CC_MONEY", 420, VendorId.RFC, UNSIGNED_32);
+        AvpCode CC_TIME = new AvpCode("CC_TIME", 420, VendorId.RFC, UNSIGNED_32);
         AvpCode CC_TOTAL_OCTETS = new AvpCode("CC_TOTAL_OCTETS", 421, VendorId.RFC, UNSIGNED_64);
         AvpCode EXPONENT = new AvpCode("EXPONENT", 429, VendorId.RFC, INTEGER_32);
         AvpCode FINAL_UNIT_INDICATION = new AvpCode("FINAL_UNIT_INDICATION", 430, VendorId.RFC, GROUPED);
