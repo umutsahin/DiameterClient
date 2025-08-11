@@ -44,7 +44,7 @@ public class DiameterClient {
             if (res.succeeded()) {
                 NetSocket newSocket = res.result();
                 this.socket = newSocket;
-                Console.trace("Successfully connected socket: " + socketAddress(newSocket) + ".");
+                Console.log("Successfully connected socket: " + socketAddress(newSocket) + ".");
                 newSocket.handler(buffer -> {
                     ByteBuf byteBuf = ((BufferImpl) buffer).byteBuf();
                     int wi = byteBuf.writerIndex();
@@ -66,7 +66,7 @@ public class DiameterClient {
                 });
 
                 newSocket.closeHandler(v -> {
-                    Console.trace("Socket closed: " + socketAddress(newSocket));
+                    Console.log("Socket closed: " + socketAddress(newSocket));
                     this.socket = null;
                 });
 
@@ -88,12 +88,8 @@ public class DiameterClient {
                                                 String flowKey,
                                                 Handler<DiameterMessage> responseHandler) {
         if (socket == null) {
-            String errorMsg = "No available sockets";
-            if (flowKey != null) {
-                errorMsg += " for flow " + flowKey;
-            }
-            Console.error(errorMsg + " (FlowKey: " + flowKey + ")");
-            return Future.failedFuture(errorMsg);
+            Console.log("Socket was not connected, re-connecting...");
+            return connect().compose(v -> sendWithResponseHandler(message, flowKey, responseHandler));
         }
         responseHandlers.put(flowKey, responseHandler);
 
